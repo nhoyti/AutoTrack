@@ -1,0 +1,3 @@
+Build it as a sequence of business flows:
+
+Customer → Vehicle → Inspection → Job → Service → Reminder → Notification → Dashboard
