@@ -16,7 +16,7 @@ AutoTrack is an internal staff application for an autohaus/body-repair shop. It 
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install "fastapi>=0.115,<1.0" "uvicorn[standard]>=0.30,<1.0" "pydantic-settings>=2.6,<3.0" "httpx>=0.27,<1.0" "pytest>=8.3,<9.0"
+make install
 .venv/bin/uvicorn app.main:app --app-dir backend --reload
 ```
 
@@ -30,6 +30,14 @@ npm start --prefix frontend
 ```
 
 The Angular application is available at `http://localhost:4200`; `proxy.conf.json` forwards `/health` and `/api` to the local backend.
+
+### Quality checks
+
+```bash
+make check
+```
+
+This runs backend tests, Ruff linting and formatting checks, and the Angular production build. Copy `backend/.env.example` to `backend/.env` to override local shop settings; all timestamps exchanged by the API use UTC ISO 8601 values.
 
 ## Development direction
 

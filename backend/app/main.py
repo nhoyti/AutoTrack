@@ -1,16 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-class Settings(BaseSettings):
-    app_name: str = "AutoTrack API"
-    environment: str = "development"
-    shop_timezone: str = "UTC"
-    currency: str = "USD"
-    odometer_unit: str = "km"
-
-    model_config = SettingsConfigDict(env_prefix="AUTOTRACK_", env_file=".env", extra="ignore")
+from .config import get_settings
 
 
 class HealthResponse(BaseModel):
@@ -25,8 +18,42 @@ class ShopConfigResponse(BaseModel):
     odometer_unit: str
 
 
-settings = Settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+class ApiError(BaseModel):
+    code: str
+    message: str
+    details: list[dict[str, object]] | None = None
+
+
+class ApiErrorResponse(BaseModel):
+    error: ApiError
+
+
+settings = get_settings()
+app = FastAPI(title=settings.app_name, version=settings.api_version)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    del request
+    return JSONResponse(
+        status_code=422,
+        content=ApiErrorResponse(
+            error=ApiError(
+                code="VALIDATION_ERROR",
+                message="The request could not be processed.",
+                details=[
+                    {
+                        "location": error["loc"],
+                        "message": error["msg"],
+                        "type": error["type"],
+                    }
+                    for error in exc.errors()
+                ],
+            )
+        ).model_dump(),
+    )
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])
@@ -45,3 +72,12 @@ def shop_config() -> ShopConfigResponse:
         currency=settings.currency,
         odometer_unit=settings.odometer_unit,
     )
+
+
+@app.get("/api/meta", tags=["system"])
+def api_meta() -> dict[str, str]:
+    return {
+        "api_version": settings.api_version,
+        "environment": settings.environment,
+        "timestamp_policy": "UTC ISO 8601",
+    }

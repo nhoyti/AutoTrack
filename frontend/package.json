@@ -5,7 +5,8 @@
   "scripts": {
     "start": "ng serve",
     "build": "ng build",
-    "test": "ng test --watch=false"
+    "test": "ng test --watch=false",
+    "check": "npm run build"
   },
   "dependencies": {
     "@angular/animations": "^19.2.0",
