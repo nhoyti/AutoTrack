@@ -1,0 +1,17 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: #f5f2eb;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: #40515b;
+  background: #f5f2eb;
+  font-family: "Manrope", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
