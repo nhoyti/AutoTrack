@@ -5,6 +5,8 @@ description = "AutoTrack staff operations API"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1.0",
+  "Pillow>=11.0,<12.0",
+  "python-multipart>=0.0.20,<1.0",
   "uvicorn[standard]>=0.30,<1.0",
   "pydantic-settings>=2.6,<3.0",
 ]

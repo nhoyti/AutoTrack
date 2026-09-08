@@ -1,13 +1,16 @@
+import hashlib
+import hmac
 import re
 import secrets
+import struct
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -21,7 +24,14 @@ from .auth import (
     verify_password,
 )
 from .config import get_settings
-from .domain import CustomerStatus, PreferredContactMethod, StaffRole
+from .domain import (
+    ConcernSeverity,
+    CustomerStatus,
+    InspectionStatus,
+    IntakeStatus,
+    PreferredContactMethod,
+    StaffRole,
+)
 
 
 class HealthResponse(BaseModel):
@@ -118,6 +128,52 @@ class VehicleRecord:
     created_at: str = field(default_factory=lambda: utc_now())
     updated_at: str = field(default_factory=lambda: utc_now())
     odometer_readings: list[OdometerReading] = field(default_factory=list)
+
+
+@dataclass
+class IntakeRecord:
+    intake_id: str
+    vehicle_id: str
+    status: IntakeStatus = IntakeStatus.DRAFT
+    notes: str | None = None
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass
+class InspectionConcern:
+    concern_id: str
+    area: str
+    condition: str
+    severity: ConcernSeverity
+    requested_work: str
+    technician_notes: str | None = None
+    recommendation: str | None = None
+
+
+@dataclass
+class InspectionRecord:
+    inspection_id: str
+    intake_id: str
+    vehicle_id: str
+    status: InspectionStatus = InspectionStatus.DRAFT
+    concerns: list[InspectionConcern] = field(default_factory=list)
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass
+class PhotoRecord:
+    photo_id: str
+    inspection_id: str
+    storage_key: str
+    content: bytes
+    mime_type: str
+    file_name: str
+    size_bytes: int
+    width: int
+    height: int
+    created_at: str = field(default_factory=lambda: utc_now())
 
 
 class CustomerCreateRequest(BaseModel):
@@ -227,9 +283,175 @@ class OdometerCorrectionResponse(BaseModel):
     readings: list[OdometerReadingResponse]
 
 
+class IntakeCreateRequest(BaseModel):
+    vehicle_id: str = Field(min_length=1)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class IntakeUpdateRequest(BaseModel):
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class IntakeResponse(BaseModel):
+    intake_id: str
+    vehicle_id: str
+    status: IntakeStatus
+    notes: str | None
+    created_at: str
+    updated_at: str
+
+
+class ConcernRequest(BaseModel):
+    area: str = Field(min_length=1, max_length=80)
+    condition: str = Field(min_length=1, max_length=255)
+    severity: ConcernSeverity
+    requested_work: str = Field(min_length=1, max_length=500)
+    technician_notes: str | None = Field(default=None, max_length=1000)
+    recommendation: str | None = Field(default=None, max_length=1000)
+
+
+class InspectionCreateRequest(BaseModel):
+    intake_id: str = Field(min_length=1)
+    concerns: list[ConcernRequest] = Field(default_factory=list, max_length=100)
+
+
+class InspectionUpdateRequest(BaseModel):
+    concerns: list[ConcernRequest] = Field(max_length=100)
+
+
+class ConcernResponse(BaseModel):
+    concern_id: str
+    area: str
+    condition: str
+    severity: ConcernSeverity
+    requested_work: str
+    technician_notes: str | None
+    recommendation: str | None
+
+
+class InspectionResponse(BaseModel):
+    inspection_id: str
+    intake_id: str
+    vehicle_id: str
+    status: InspectionStatus
+    concerns: list[ConcernResponse]
+    created_at: str
+    updated_at: str
+
+
+class PhotoResponse(BaseModel):
+    photo_id: str
+    inspection_id: str
+    storage_key: str
+    file_name: str
+    mime_type: str
+    size_bytes: int
+    width: int
+    height: int
+    url: str
+    created_at: str
+
+
 AUDIT_EVENTS: list[AuditEventResponse] = []
 CUSTOMERS: list[CustomerRecord] = []
 VEHICLES: list[VehicleRecord] = []
+INTAKES: list[IntakeRecord] = []
+INSPECTIONS: list[InspectionRecord] = []
+PHOTOS: list[PhotoRecord] = []
+
+PHOTO_MAX_BYTES = 10 * 1024 * 1024
+PHOTO_MAX_DIMENSION = 10_000
+PHOTO_URL_TTL_SECONDS = 300
+
+
+def image_dimensions(content: bytes, mime_type: str) -> tuple[int, int]:
+    if mime_type == "image/png" and content.startswith(b"\x89PNG\r\n\x1a\n"):
+        width, height = struct.unpack(">II", content[16:24])
+        return width, height
+    if mime_type == "image/gif" and content[:6] in (b"GIF87a", b"GIF89a"):
+        width, height = struct.unpack("<HH", content[6:10])
+        return width, height
+    if mime_type == "image/jpeg" and content[:2] == b"\xff\xd8":
+        offset = 2
+        while offset + 9 < len(content):
+            if content[offset] != 0xFF:
+                offset += 1
+                continue
+            marker = content[offset + 1]
+            offset += 2
+            if marker in (0xD8, 0xD9):
+                continue
+            segment_length = struct.unpack(">H", content[offset : offset + 2])[0]
+            if marker in range(0xC0, 0xC4):
+                height, width = struct.unpack(">HH", content[offset + 3 : offset + 7])
+                return width, height
+            offset += segment_length
+    raise HTTPException(
+        status_code=400,
+        detail="PHOTO_INVALID: The uploaded file is not a supported image.",
+    )
+
+
+def get_intake_or_404(intake_id: str) -> IntakeRecord:
+    intake = next((item for item in INTAKES if item.intake_id == intake_id), None)
+    if intake is None:
+        raise HTTPException(status_code=404, detail="Intake was not found.")
+    return intake
+
+
+def get_inspection_or_404(inspection_id: str) -> InspectionRecord:
+    inspection = next(
+        (item for item in INSPECTIONS if item.inspection_id == inspection_id), None
+    )
+    if inspection is None:
+        raise HTTPException(status_code=404, detail="Inspection was not found.")
+    return inspection
+
+
+def signed_photo_token(photo_id: str, expires_at: int) -> str:
+    payload = f"{photo_id}.{expires_at}"
+    signature = hmac.new(
+        settings.auth_secret.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def verify_photo_token(photo_id: str, token: str) -> None:
+    try:
+        token_photo_id, expires_at, signature = token.split(".", 2)
+        payload = f"{token_photo_id}.{expires_at}"
+        expected = hmac.new(
+            settings.auth_secret.encode(), payload.encode(), hashlib.sha256
+        ).hexdigest()
+        if (
+            token_photo_id != photo_id
+            or not hmac.compare_digest(signature, expected)
+            or int(expires_at) < int(datetime.now(UTC).timestamp())
+        ):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=403, detail="The photo URL is invalid or expired."
+        ) from None
+
+
+def photo_response(photo: PhotoRecord) -> PhotoResponse:
+    expires_at = int(datetime.now(UTC).timestamp()) + PHOTO_URL_TTL_SECONDS
+    return PhotoResponse(
+        photo_id=photo.photo_id,
+        inspection_id=photo.inspection_id,
+        storage_key=photo.storage_key,
+        file_name=photo.file_name,
+        mime_type=photo.mime_type,
+        size_bytes=photo.size_bytes,
+        width=photo.width,
+        height=photo.height,
+        url=(
+            f"/api/photos/{photo.photo_id}/content?token="
+            f"{signed_photo_token(photo.photo_id, expires_at)}"
+        ),
+        created_at=photo.created_at,
+    )
 
 
 settings = get_settings()
@@ -824,3 +1046,297 @@ def create_odometer_correction(
             for reading in vehicle.odometer_readings
         ],
     )
+
+
+def intake_response(intake: IntakeRecord) -> IntakeResponse:
+    return IntakeResponse.model_validate(intake, from_attributes=True)
+
+
+def concern_from_request(request: ConcernRequest) -> InspectionConcern:
+    return InspectionConcern(
+        concern_id=uuid4().hex,
+        area=request.area.strip(),
+        condition=request.condition.strip(),
+        severity=request.severity,
+        requested_work=request.requested_work.strip(),
+        technician_notes=(
+            request.technician_notes.strip() if request.technician_notes else None
+        ),
+        recommendation=(
+            request.recommendation.strip() if request.recommendation else None
+        ),
+    )
+
+
+@app.post(
+    "/api/intakes",
+    response_model=IntakeResponse,
+    status_code=201,
+    tags=["intake"],
+)
+def create_or_resume_intake(
+    request: IntakeCreateRequest,
+    user: Annotated[
+        StaffUser,
+        Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR)),
+    ],
+) -> IntakeResponse:
+    del user
+    get_vehicle_or_404(request.vehicle_id)
+    existing = next(
+        (
+            intake
+            for intake in INTAKES
+            if intake.vehicle_id == request.vehicle_id
+            and intake.status == IntakeStatus.DRAFT
+        ),
+        None,
+    )
+    if existing is not None:
+        if request.notes is not None:
+            existing.notes = request.notes.strip() or None
+            existing.updated_at = utc_now()
+        return intake_response(existing)
+
+    intake = IntakeRecord(
+        intake_id=uuid4().hex,
+        vehicle_id=request.vehicle_id,
+        notes=request.notes.strip() if request.notes else None,
+    )
+    INTAKES.append(intake)
+    return intake_response(intake)
+
+
+@app.get("/api/intakes/{intake_id}", response_model=IntakeResponse, tags=["intake"])
+def get_intake(
+    intake_id: str,
+    user: Annotated[StaffUser, Depends(get_current_user)],
+) -> IntakeResponse:
+    del user
+    return intake_response(get_intake_or_404(intake_id))
+
+
+@app.patch("/api/intakes/{intake_id}", response_model=IntakeResponse, tags=["intake"])
+def update_intake(
+    intake_id: str,
+    request: IntakeUpdateRequest,
+    user: Annotated[
+        StaffUser,
+        Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR)),
+    ],
+) -> IntakeResponse:
+    del user
+    intake = get_intake_or_404(intake_id)
+    if intake.status == IntakeStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="A completed intake is immutable.")
+    intake.notes = request.notes.strip() if request.notes else None
+    intake.updated_at = utc_now()
+    return intake_response(intake)
+
+
+@app.post(
+    "/api/intakes/{intake_id}/complete",
+    response_model=IntakeResponse,
+    tags=["intake"],
+)
+def complete_intake(
+    intake_id: str,
+    user: Annotated[
+        StaffUser,
+        Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR)),
+    ],
+) -> IntakeResponse:
+    del user
+    intake = get_intake_or_404(intake_id)
+    intake.status = IntakeStatus.COMPLETED
+    intake.updated_at = utc_now()
+    return intake_response(intake)
+
+
+def inspection_response(inspection: InspectionRecord) -> InspectionResponse:
+    return InspectionResponse.model_validate(inspection, from_attributes=True)
+
+
+@app.post(
+    "/api/inspections",
+    response_model=InspectionResponse,
+    status_code=201,
+    tags=["inspections"],
+)
+def create_inspection(
+    request: InspectionCreateRequest,
+    user: Annotated[
+        StaffUser,
+        Depends(
+            require_roles(
+                StaffRole.ADMIN_MANAGER,
+                StaffRole.SERVICE_ADVISOR,
+                StaffRole.TECHNICIAN_PAINTER,
+            )
+        ),
+    ],
+) -> InspectionResponse:
+    del user
+    intake = get_intake_or_404(request.intake_id)
+    existing = next(
+        (item for item in INSPECTIONS if item.intake_id == intake.intake_id), None
+    )
+    if existing is not None:
+        return inspection_response(existing)
+    inspection = InspectionRecord(
+        inspection_id=uuid4().hex,
+        intake_id=intake.intake_id,
+        vehicle_id=intake.vehicle_id,
+        concerns=[concern_from_request(item) for item in request.concerns],
+    )
+    INSPECTIONS.append(inspection)
+    return inspection_response(inspection)
+
+
+@app.get(
+    "/api/inspections/{inspection_id}",
+    response_model=InspectionResponse,
+    tags=["inspections"],
+)
+def get_inspection(
+    inspection_id: str,
+    user: Annotated[StaffUser, Depends(get_current_user)],
+) -> InspectionResponse:
+    del user
+    return inspection_response(get_inspection_or_404(inspection_id))
+
+
+@app.patch(
+    "/api/inspections/{inspection_id}",
+    response_model=InspectionResponse,
+    tags=["inspections"],
+)
+def update_inspection(
+    inspection_id: str,
+    request: InspectionUpdateRequest,
+    user: Annotated[
+        StaffUser,
+        Depends(
+            require_roles(
+                StaffRole.ADMIN_MANAGER,
+                StaffRole.SERVICE_ADVISOR,
+                StaffRole.TECHNICIAN_PAINTER,
+            )
+        ),
+    ],
+) -> InspectionResponse:
+    del user
+    inspection = get_inspection_or_404(inspection_id)
+    if inspection.status == InspectionStatus.COMPLETED:
+        raise HTTPException(
+            status_code=409, detail="A completed inspection is immutable."
+        )
+    inspection.concerns = [concern_from_request(item) for item in request.concerns]
+    inspection.updated_at = utc_now()
+    return inspection_response(inspection)
+
+
+@app.post(
+    "/api/inspections/{inspection_id}/complete",
+    response_model=InspectionResponse,
+    tags=["inspections"],
+)
+def complete_inspection(
+    inspection_id: str,
+    user: Annotated[
+        StaffUser,
+        Depends(
+            require_roles(
+                StaffRole.ADMIN_MANAGER,
+                StaffRole.SERVICE_ADVISOR,
+                StaffRole.TECHNICIAN_PAINTER,
+            )
+        ),
+    ],
+) -> InspectionResponse:
+    del user
+    inspection = get_inspection_or_404(inspection_id)
+    if not inspection.concerns:
+        raise HTTPException(
+            status_code=400, detail="An inspection must contain at least one concern."
+        )
+    inspection.status = InspectionStatus.COMPLETED
+    inspection.updated_at = utc_now()
+    return inspection_response(inspection)
+
+
+@app.post(
+    "/api/inspections/{inspection_id}/photos",
+    response_model=PhotoResponse,
+    status_code=201,
+    tags=["photos"],
+)
+def upload_inspection_photo(
+    inspection_id: str,
+    file: Annotated[UploadFile, File(...)],
+    user: Annotated[
+        StaffUser,
+        Depends(
+            require_roles(
+                StaffRole.ADMIN_MANAGER,
+                StaffRole.SERVICE_ADVISOR,
+                StaffRole.TECHNICIAN_PAINTER,
+            )
+        ),
+    ],
+) -> PhotoResponse:
+    del user
+    inspection = get_inspection_or_404(inspection_id)
+    allowed_types = {"image/jpeg", "image/png", "image/gif"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "PHOTO_MIME_UNSUPPORTED: Only JPEG, PNG, and GIF images are allowed."
+            ),
+        )
+    content = file.file.read(PHOTO_MAX_BYTES + 1)
+    if len(content) > PHOTO_MAX_BYTES:
+        raise HTTPException(
+            status_code=413, detail="PHOTO_TOO_LARGE: The image exceeds 10 MB."
+        )
+    width, height = image_dimensions(content, file.content_type)
+    if width < 1 or height < 1 or max(width, height) > PHOTO_MAX_DIMENSION:
+        raise HTTPException(
+            status_code=400,
+            detail="PHOTO_DIMENSIONS_INVALID: The image dimensions are not supported.",
+        )
+    photo = PhotoRecord(
+        photo_id=uuid4().hex,
+        inspection_id=inspection.inspection_id,
+        storage_key=f"inspections/{inspection.inspection_id}/{uuid4().hex}",
+        content=content,
+        mime_type=file.content_type,
+        file_name=file.filename or "inspection-photo",
+        size_bytes=len(content),
+        width=width,
+        height=height,
+    )
+    PHOTOS.append(photo)
+    return photo_response(photo)
+
+
+@app.get("/api/photos/{photo_id}", response_model=PhotoResponse, tags=["photos"])
+def get_photo(
+    photo_id: str,
+    user: Annotated[StaffUser, Depends(get_current_user)],
+) -> PhotoResponse:
+    del user
+    photo = next((item for item in PHOTOS if item.photo_id == photo_id), None)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo was not found.")
+    return photo_response(photo)
+
+
+@app.get("/api/photos/{photo_id}/content", tags=["photos"])
+def get_photo_content(photo_id: str, token: str = Query(...)) -> Response:
+    verify_photo_token(photo_id, token)
+    photo = next((item for item in PHOTOS if item.photo_id == photo_id), None)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo was not found.")
+    return Response(content=photo.content, media_type=photo.mime_type)

@@ -42,6 +42,12 @@ npm start --prefix frontend
 
 The Angular application is available at `http://localhost:4200`; `proxy.conf.json` forwards `/health` and `/api` to the local backend.
 
+### Sprint 3 intake and inspections
+
+The dashboard supports resumable vehicle intake, structured inspection concerns,
+and private image uploads. Photo uploads accept JPEG, PNG, and GIF files up to
+10 MB, validate image dimensions, and return five-minute signed content URLs.
+
 ### Quality checks
 
 ```bash
@@ -52,4 +58,7 @@ This runs backend tests, Ruff linting and formatting checks, and the Angular pro
 
 ## Development direction
 
-The next implementation slice is staff authentication and API-enforced roles, followed by Customer and Vehicle records. Features outside the MVP, including customer portal, booking, payments, inventory, AI recommendations, and multi-branch administration, remain deferred.
+The implemented slices cover staff authentication, Customer and Vehicle records,
+and Intake and Digital Inspections. Features outside the MVP, including customer
+portal, booking, payments, inventory, AI recommendations, and multi-branch
+administration, remain deferred.

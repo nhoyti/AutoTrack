@@ -398,6 +398,46 @@ ol li span {
   cursor: pointer;
 }
 
+.intake-panel {
+  margin-top: 24px;
+}
+
+.workflow-note {
+  color: #5b6c73;
+  font-size: 0.84rem;
+}
+
+.intake-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.upload-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+  color: #5b6c73;
+  font-size: 0.8rem;
+}
+
+.upload-control {
+  display: grid;
+  gap: 7px;
+  color: #40515b;
+  font-weight: 700;
+}
+
+.retry-button {
+  border: 1px solid #d45b45;
+  background: transparent;
+  color: #d45b45;
+  padding: 7px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 22px 18px 48px;
@@ -416,7 +456,8 @@ ol li span {
     font-size: 4.5rem;
   }
   .metric-grid,
-  .foundation-grid {
+  .foundation-grid,
+  .intake-grid {
     grid-template-columns: 1fr;
     display: grid;
   }

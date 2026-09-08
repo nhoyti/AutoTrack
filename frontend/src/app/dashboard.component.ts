@@ -1,4 +1,9 @@
-import { HttpClient, HttpParams } from "@angular/common/http";
+import {
+  HttpClient,
+  HttpEventType,
+  HttpParams,
+  HttpRequest,
+} from "@angular/common/http";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -47,6 +52,19 @@ interface Vehicle {
     source_record: string;
     is_correction?: boolean;
   }>;
+}
+
+interface Intake {
+  intake_id: string;
+  vehicle_id: string;
+  status: string;
+  notes?: string | null;
+}
+
+interface Inspection {
+  inspection_id: string;
+  status: string;
+  concerns: Array<{ area: string; condition: string; severity: string }>;
 }
 
 @Component({
@@ -288,6 +306,48 @@ interface Vehicle {
           </form>
         </article>
       </section>
+
+      <section class="panel-card intake-panel">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Sprint 3</p>
+            <h3>Digital intake &amp; inspection</h3>
+          </div>
+          <span class="date-label">{{ intake()?.status ?? "Not started" }}</span>
+        </div>
+        <p class="workflow-note">
+          Select a vehicle above to resume its draft intake. Photos stay private and expire after five minutes.
+        </p>
+        <div class="intake-grid">
+          <form class="stacked-form" (ngSubmit)="saveIntake()">
+            <label>
+              Selected vehicle
+              <input [value]="selectedVehicle()?.plate_number ?? 'Choose a vehicle'" readonly />
+            </label>
+            <label>
+              Intake notes
+              <input [(ngModel)]="intakeNotes" name="intakeNotes" placeholder="Customer concerns or context" />
+            </label>
+            <button type="submit" [disabled]="!selectedVehicle()">{{ intake() ? "Resume intake" : "Start intake" }}</button>
+          </form>
+          <form class="stacked-form" (ngSubmit)="saveInspection()">
+            <label>Vehicle area <input [(ngModel)]="concern.area" name="concernArea" required /></label>
+            <label>Condition <input [(ngModel)]="concern.condition" name="concernCondition" required /></label>
+            <label>Requested work <input [(ngModel)]="concern.requested_work" name="requestedWork" required /></label>
+            <label>Severity
+              <select [(ngModel)]="concern.severity" name="concernSeverity">
+                <option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option>
+              </select>
+            </label>
+            <button type="submit" [disabled]="!intake()">Save concern</button>
+          </form>
+        </div>
+        <div class="upload-row">
+          <label class="upload-control">Attach photo <input type="file" accept="image/jpeg,image/png,image/gif" (change)="uploadPhoto($event)" [disabled]="!inspection()" /></label>
+          @if (uploadState()) { <span>{{ uploadState() }}{{ uploadProgress() ? " " + uploadProgress() + "%" : "" }}</span> }
+          @if (lastUpload && uploadState() === "Upload failed") { <button type="button" class="retry-button" (click)="retryUpload()">Retry</button> }
+        </div>
+      </section>
     </main>
   `,
   styleUrls: ["./app.component.scss"],
@@ -302,9 +362,17 @@ export class DashboardComponent {
   readonly user = this.auth.user;
   readonly customers = signal<Customer[]>([]);
   readonly vehicles = signal<Vehicle[]>([]);
+  readonly selectedVehicle = signal<Vehicle | null>(null);
+  readonly intake = signal<Intake | null>(null);
+  readonly inspection = signal<Inspection | null>(null);
+  readonly uploadState = signal("");
+  readonly uploadProgress = signal(0);
 
   customerQuery = "";
   vehicleQuery = "";
+  intakeNotes = "";
+  lastUpload: File | null = null;
+  concern = { area: "", condition: "", severity: "MEDIUM", requested_work: "" };
   newCustomer = {
     full_name: "",
     mobile_number: "",
@@ -365,6 +433,7 @@ export class DashboardComponent {
   }
 
   selectVehicle(vehicle: Vehicle): void {
+    this.selectedVehicle.set(vehicle);
     this.newVehicle.customer_id = vehicle.customer_id;
     this.newVehicle.plate_number = vehicle.plate_number;
     this.newVehicle.make = vehicle.make ?? "";
@@ -372,6 +441,51 @@ export class DashboardComponent {
     this.newVehicle.color = vehicle.color ?? "";
     this.newVehicle.vin_chassis_number = vehicle.vin_chassis_number ?? "";
     this.newVehicle.current_odometer = vehicle.current_odometer;
+  }
+
+  saveIntake(): void {
+    const vehicle = this.selectedVehicle();
+    if (!vehicle) return;
+    this.http.post<Intake>("/api/intakes", { vehicle_id: vehicle.vehicle_id, notes: this.intakeNotes }).subscribe({
+      next: (intake) => this.intake.set(intake),
+    });
+  }
+
+  saveInspection(): void {
+    const intake = this.intake();
+    if (!intake) return;
+    const payload = { intake_id: intake.intake_id, concerns: [this.concern] };
+    this.http.post<Inspection>("/api/inspections", payload).subscribe({
+      next: (inspection) => this.inspection.set(inspection),
+    });
+  }
+
+  uploadPhoto(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (file) this.sendPhoto(file);
+  }
+
+  retryUpload(): void {
+    if (this.lastUpload) this.sendPhoto(this.lastUpload);
+  }
+
+  private sendPhoto(file: File): void {
+    const inspection = this.inspection();
+    if (!inspection) return;
+    this.lastUpload = file;
+    this.uploadState.set("Uploading");
+    this.uploadProgress.set(0);
+    const form = new FormData();
+    form.append("file", file);
+    const request = new HttpRequest("POST", `/api/inspections/${inspection.inspection_id}/photos`, form, { reportProgress: true });
+    this.http.request(request).subscribe({
+      next: (event) => {
+        if (event.type === HttpEventType.UploadProgress && event.total) this.uploadProgress.set(Math.round((event.loaded / event.total) * 100));
+        if (event.type === HttpEventType.Response) this.uploadState.set("Photo attached");
+      },
+      error: () => this.uploadState.set("Upload failed"),
+    });
   }
 
   createCustomer(): void {

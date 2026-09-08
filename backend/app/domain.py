@@ -39,3 +39,20 @@ class ReminderStage(StrEnum):
     SEVEN_DAYS = "7_DAYS"
     DUE_TODAY = "DUE_TODAY"
     OVERDUE = "OVERDUE"
+
+
+class IntakeStatus(StrEnum):
+    DRAFT = "DRAFT"
+    COMPLETED = "COMPLETED"
+
+
+class InspectionStatus(StrEnum):
+    DRAFT = "DRAFT"
+    COMPLETED = "COMPLETED"
+
+
+class ConcernSeverity(StrEnum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"

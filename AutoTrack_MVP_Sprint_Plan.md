@@ -242,12 +242,18 @@ The following features are outside the MVP:
 
 ## Current Implementation Status
 
-The initial project foundation is in place:
+The implemented project foundation and Sprint 3 increment include:
 
 - FastAPI backend with health and shop configuration endpoints
 - Angular standalone frontend shell
 - Responsive operations dashboard foundation
 - Development proxy between Angular and FastAPI
 - Backend tests and frontend production build
+- Resumable vehicle intake drafts with one active draft per vehicle
+- Structured inspection concerns with area, condition, severity, requested work,
+  technician notes, and recommendations
+- Private server-generated photo keys with MIME, size, and image-dimension validation
+- Five-minute signed photo URLs and role-enforced photo access metadata
+- Dashboard intake, inspection, upload-progress, retry, and failure states
 
-The next implementation slice is staff authentication and API-enforced roles, followed by Customer and Vehicle records.
+The next implementation slice is Paint and Body Repair Jobs.
