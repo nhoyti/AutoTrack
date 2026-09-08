@@ -6,8 +6,9 @@ import io
 import re
 import uuid
 from copy import deepcopy
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse, Response
@@ -29,11 +30,16 @@ from app.domain import (
     InspectionStatus,
     IntakeStatus,
     JobStatus,
+    NotificationAttemptStatus,
+    NotificationChannel,
+    NotificationStatus,
+    ReminderStage,
     ScheduleRuleType,
     ScheduleStatus,
     ServiceStatus,
     StaffRole,
 )
+from app.notifications import PROVIDERS
 
 settings = get_settings()
 
@@ -72,6 +78,24 @@ class CustomerCreateRequest(BaseModel):
     email: str | None = None
     preferred_contact_method: str | None = None
     status: str = "ACTIVE"
+    master_opt_in: bool = True
+    sms_opt_in: bool = True
+    email_opt_in: bool = True
+    whatsapp_opt_in: bool = True
+    timezone: str = "UTC"
+    quiet_hours_start: str = "21:00"
+    quiet_hours_end: str = "08:00"
+
+
+class NotificationPreferencesRequest(BaseModel):
+    master_opt_in: bool | None = None
+    sms_opt_in: bool | None = None
+    email_opt_in: bool | None = None
+    whatsapp_opt_in: bool | None = None
+    preferred_contact_method: str | None = None
+    timezone: str | None = None
+    quiet_hours_start: str | None = None
+    quiet_hours_end: str | None = None
 
 
 class VehicleCreateRequest(BaseModel):
@@ -185,6 +209,15 @@ class ScheduleEvaluationRequest(BaseModel):
     odometer: int | None = Field(default=None, ge=0)
 
 
+class ReminderGenerationRequest(BaseModel):
+    evaluated_at: datetime | None = None
+
+
+class NotificationDispatchRequest(BaseModel):
+    evaluated_at: datetime | None = None
+    max_attempts: int = Field(default=3, ge=1, le=10)
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -220,6 +253,10 @@ INSPECTIONS: dict[str, dict[str, Any]] = {}
 JOBS: dict[str, dict[str, Any]] = {}
 SERVICES: dict[str, dict[str, Any]] = {}
 MAINTENANCE_SCHEDULES: dict[str, dict[str, Any]] = {}
+REMINDERS: dict[str, dict[str, Any]] = {}
+NOTIFICATIONS: dict[str, dict[str, Any]] = {}
+NOTIFICATION_ATTEMPTS: list[dict[str, Any]] = []
+WEBHOOK_EVENTS: list[dict[str, Any]] = []
 AUDIT_EVENTS: list[dict[str, Any]] = []
 SIGNED_PHOTOS: dict[str, dict[str, Any]] = {}
 
@@ -367,6 +404,10 @@ def list_audit_events(user: StaffUser = Depends(get_current_user)) -> list[dict[
 
 @app.post("/api/customers", status_code=status.HTTP_201_CREATED)
 def create_customer(payload: CustomerCreateRequest, user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR))) -> dict[str, Any]:
+    try:
+        ZoneInfo(payload.timezone)
+    except ZoneInfoNotFoundError:
+        raise_api_error("INVALID_TIMEZONE", "Unknown customer timezone.", status.HTTP_400_BAD_REQUEST)
     customer_id = uuid.uuid4().hex
     customer = {
         "customer_id": customer_id,
@@ -375,11 +416,41 @@ def create_customer(payload: CustomerCreateRequest, user: StaffUser = Depends(re
         "email": payload.email,
         "preferred_contact_method": payload.preferred_contact_method,
         "status": payload.status,
+        "master_opt_in": payload.master_opt_in,
+        "sms_opt_in": payload.sms_opt_in,
+        "email_opt_in": payload.email_opt_in,
+        "whatsapp_opt_in": payload.whatsapp_opt_in,
+        "timezone": payload.timezone,
+        "quiet_hours_start": payload.quiet_hours_start,
+        "quiet_hours_end": payload.quiet_hours_end,
         "created_at": iso_utc(),
         "updated_at": iso_utc(),
     }
     CUSTOMERS[customer_id] = customer
     record_audit("CUSTOMER_CREATED", user.user_id, {"customer_id": customer_id})
+    return customer
+
+
+@app.patch("/api/customers/{customer_id}/notification-preferences")
+def update_notification_preferences(
+    customer_id: str,
+    payload: NotificationPreferencesRequest,
+    user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR)),
+) -> dict[str, Any]:
+    customer = CUSTOMERS.get(customer_id)
+    if customer is None:
+        raise_api_error("CUSTOMER_NOT_FOUND", "Customer not found.", status.HTTP_404_NOT_FOUND)
+    updates = payload.model_dump(exclude_none=True)
+    if "timezone" in updates:
+        try:
+            ZoneInfo(updates["timezone"])
+        except ZoneInfoNotFoundError:
+            raise_api_error("INVALID_TIMEZONE", "Unknown customer timezone.", status.HTTP_400_BAD_REQUEST)
+    customer.update(updates)
+    customer["updated_at"] = iso_utc()
+    if updates.get("master_opt_in") is False:
+        cancel_unsent_notifications(customer_id, "Customer opted out")
+    record_audit("NOTIFICATION_PREFERENCES_UPDATED", user.user_id, {"customer_id": customer_id})
     return customer
 
 
@@ -1050,3 +1121,215 @@ def evaluate_maintenance_schedule(
     result["evaluated_at"] = iso_utc(evaluated_at)
     result["evaluated_odometer"] = odometer
     return result
+
+
+def reminder_stage(schedule: dict[str, Any], evaluated_at: datetime, timezone: str = "UTC") -> str | None:
+    if not schedule.get("due_date"):
+        return None
+    try:
+        local_date = evaluated_at.astimezone(ZoneInfo(timezone)).date()
+    except ZoneInfoNotFoundError:
+        local_date = evaluated_at.astimezone(UTC).date()
+    due_date = date.fromisoformat(schedule["due_date"])
+    days_until_due = (due_date - local_date).days
+    if days_until_due == 30:
+        return ReminderStage.THIRTY_DAYS.value
+    if days_until_due == 7:
+        return ReminderStage.SEVEN_DAYS.value
+    if days_until_due == 0:
+        return ReminderStage.DUE_TODAY.value
+    if days_until_due < 0:
+        return ReminderStage.OVERDUE.value
+    return None
+
+
+def enabled_channels(customer: dict[str, Any]) -> list[tuple[NotificationChannel, str]]:
+    configured = {
+        NotificationChannel.SMS: (customer.get("sms_opt_in", True), customer.get("mobile_number")),
+        NotificationChannel.EMAIL: (customer.get("email_opt_in", True), customer.get("email")),
+        NotificationChannel.WHATSAPP: (customer.get("whatsapp_opt_in", True), customer.get("mobile_number")),
+    }
+    preferred = customer.get("preferred_contact_method")
+    order = [NotificationChannel.SMS, NotificationChannel.EMAIL, NotificationChannel.WHATSAPP]
+    try:
+        preferred_channel = NotificationChannel(preferred) if preferred else None
+    except ValueError:
+        preferred_channel = None
+    if preferred_channel in order:
+        order.remove(preferred_channel)
+        order.insert(0, preferred_channel)
+    return [(channel, configured[channel][1]) for channel in order if configured[channel][0] and configured[channel][1]]
+
+
+def in_quiet_hours(customer: dict[str, Any], evaluated_at: datetime) -> bool:
+    try:
+        local_time = evaluated_at.astimezone(ZoneInfo(customer.get("timezone", "UTC"))).time()
+        start = datetime.strptime(customer.get("quiet_hours_start", "21:00"), "%H:%M").time()
+        end = datetime.strptime(customer.get("quiet_hours_end", "08:00"), "%H:%M").time()
+    except (ValueError, ZoneInfoNotFoundError):
+        return False
+    if start < end:
+        return start <= local_time < end
+    return local_time >= start or local_time < end
+
+
+def cancel_unsent_notifications(customer_id: str, reason: str) -> None:
+    for notification in NOTIFICATIONS.values():
+        if notification["customer_id"] != customer_id:
+            continue
+        if notification["status"] in {NotificationStatus.PENDING.value, NotificationStatus.QUEUED.value, NotificationStatus.RETRYING.value}:
+            notification["status"] = NotificationStatus.CANCELLED.value
+            notification["cancellation_reason"] = reason
+            notification["cancelled_at"] = iso_utc()
+
+
+def notification_body(reminder: dict[str, Any], schedule: dict[str, Any]) -> str:
+    due = schedule.get("due_date") or "the scheduled interval"
+    return f"AutoTrack reminder: {reminder['reminder_stage']} maintenance for your vehicle is due {due}."
+
+
+@app.post("/api/reminders/generate")
+def generate_reminders(
+    payload: ReminderGenerationRequest | None = None,
+    user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR)),
+) -> dict[str, Any]:
+    evaluated_at = payload.evaluated_at if payload and payload.evaluated_at else datetime.now(UTC)
+    created_reminders = []
+    for schedule in MAINTENANCE_SCHEDULES.values():
+        if schedule["status"] in {ScheduleStatus.COMPLETED.value, ScheduleStatus.SKIPPED.value, ScheduleStatus.CANCELLED.value}:
+            continue
+        vehicle = get_vehicle_or_404(schedule["vehicle_id"])
+        customer = CUSTOMERS.get(vehicle["customer_id"])
+        if customer is None:
+            continue
+        stage = reminder_stage(schedule, evaluated_at, customer.get("timezone", "UTC"))
+        if stage is None:
+            continue
+        reminder_key = f"{schedule['schedule_id']}:{stage}"
+        if reminder_key in REMINDERS:
+            continue
+        reminder_id = uuid.uuid4().hex
+        reminder = {
+            "reminder_id": reminder_id,
+            "idempotency_key": reminder_key,
+            "schedule_id": schedule["schedule_id"],
+            "vehicle_id": vehicle["vehicle_id"],
+            "customer_id": customer["customer_id"],
+            "reminder_stage": stage,
+            "status": "GENERATED" if customer.get("master_opt_in", True) else "CANCELLED",
+            "cancellation_reason": None if customer.get("master_opt_in", True) else "Customer opted out",
+            "generated_at": iso_utc(evaluated_at),
+        }
+        REMINDERS[reminder_key] = reminder
+        if customer.get("master_opt_in", True):
+            for channel, destination in enabled_channels(customer):
+                notification_id = uuid.uuid4().hex
+                NOTIFICATIONS[notification_id] = {
+                    "notification_id": notification_id,
+                    "reminder_id": reminder_id,
+                    "customer_id": customer["customer_id"],
+                    "channel": channel.value,
+                    "destination": destination,
+                    "status": NotificationStatus.PENDING.value,
+                    "attempt_count": 0,
+                    "provider_message_id": None,
+                    "created_at": iso_utc(),
+                    "next_attempt_at": None,
+                }
+        created_reminders.append(reminder)
+    record_audit("REMINDERS_GENERATED", user.user_id, {"count": len(created_reminders)})
+    return {"reminders": created_reminders, "created_count": len(created_reminders)}
+
+
+@app.get("/api/reminders")
+def list_reminders(user: StaffUser = Depends(get_current_user)) -> list[dict[str, Any]]:
+    return list(REMINDERS.values())
+
+
+@app.get("/api/notifications")
+def list_notifications(user: StaffUser = Depends(get_current_user)) -> list[dict[str, Any]]:
+    return list(NOTIFICATIONS.values())
+
+
+@app.get("/api/notifications/attempts")
+def list_notification_attempts(user: StaffUser = Depends(get_current_user)) -> list[dict[str, Any]]:
+    return NOTIFICATION_ATTEMPTS
+
+
+@app.post("/api/notifications/dispatch")
+def dispatch_notifications(
+    payload: NotificationDispatchRequest | None = None,
+    user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR)),
+) -> dict[str, Any]:
+    evaluated_at = payload.evaluated_at if payload and payload.evaluated_at else datetime.now(UTC)
+    max_attempts = payload.max_attempts if payload else 3
+    sent = deferred = failed = 0
+    for notification in NOTIFICATIONS.values():
+        if notification["status"] not in {NotificationStatus.PENDING.value, NotificationStatus.RETRYING.value}:
+            continue
+        customer = CUSTOMERS.get(notification["customer_id"])
+        if customer is None or not customer.get("master_opt_in", True):
+            notification["status"] = NotificationStatus.CANCELLED.value
+            notification["cancellation_reason"] = "Customer opted out"
+            continue
+        next_attempt = notification.get("next_attempt_at")
+        if next_attempt and datetime.fromisoformat(next_attempt.replace("Z", "+00:00")) > evaluated_at:
+            continue
+        if in_quiet_hours(customer, evaluated_at):
+            notification["deferred_until"] = (evaluated_at + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+            deferred += 1
+            continue
+        notification["status"] = NotificationStatus.QUEUED.value
+        notification["attempt_count"] += 1
+        attempt = {
+            "attempt_id": uuid.uuid4().hex,
+            "notification_id": notification["notification_id"],
+            "attempt_number": notification["attempt_count"],
+            "status": None,
+            "attempted_at": iso_utc(evaluated_at),
+            "error": None,
+            "provider_message_id": None,
+        }
+        try:
+            channel = NotificationChannel(notification["channel"])
+            reminder = next(item for item in REMINDERS.values() if item["reminder_id"] == notification["reminder_id"])
+            schedule = MAINTENANCE_SCHEDULES[reminder["schedule_id"]]
+            result = PROVIDERS[channel].send(notification["destination"], notification_body(reminder, schedule), notification["notification_id"])
+            notification["status"] = NotificationStatus.SENT.value
+            notification["provider_message_id"] = result.provider_message_id
+            attempt["status"] = NotificationAttemptStatus.SUCCEEDED.value
+            attempt["provider_message_id"] = result.provider_message_id
+            sent += 1
+        except Exception as exc:
+            attempt["error"] = str(exc)
+            transient = getattr(exc, "transient", True)
+            if transient and notification["attempt_count"] < max_attempts:
+                notification["status"] = NotificationStatus.RETRYING.value
+                notification["next_attempt_at"] = (evaluated_at + timedelta(minutes=2 ** notification["attempt_count"])).isoformat().replace("+00:00", "Z")
+                attempt["status"] = NotificationAttemptStatus.TRANSIENT_FAILURE.value
+            else:
+                notification["status"] = NotificationStatus.FAILED.value
+                attempt["status"] = NotificationAttemptStatus.PERMANENT_FAILURE.value
+                failed += 1
+        NOTIFICATION_ATTEMPTS.append(attempt)
+    record_audit("NOTIFICATIONS_DISPATCHED", user.user_id, {"sent": sent, "deferred": deferred, "failed": failed})
+    return {"sent": sent, "deferred": deferred, "failed": failed}
+
+
+@app.post("/api/notifications/webhooks/{channel}")
+def receive_notification_webhook(channel: str, payload: dict[str, Any]) -> dict[str, Any]:
+    event = {"event_id": uuid.uuid4().hex, "channel": channel.upper(), "payload": payload, "received_at": iso_utc()}
+    WEBHOOK_EVENTS.append(event)
+    provider_message_id = payload.get("provider_message_id")
+    for notification in NOTIFICATIONS.values():
+        if notification.get("provider_message_id") == provider_message_id:
+            notification["last_webhook_event"] = payload.get("event_type")
+            notification["webhook_received_at"] = event["received_at"]
+            break
+    record_audit("NOTIFICATION_WEBHOOK_RECEIVED", details={"channel": channel.upper(), "provider_message_id": provider_message_id})
+    return event
+
+
+@app.get("/api/notifications/webhooks")
+def list_notification_webhooks(user: StaffUser = Depends(get_current_user)) -> list[dict[str, Any]]:
+    return WEBHOOK_EVENTS

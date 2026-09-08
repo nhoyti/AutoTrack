@@ -73,6 +73,27 @@ class ScheduleStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class NotificationChannel(StrEnum):
+    SMS = "SMS"
+    EMAIL = "EMAIL"
+    WHATSAPP = "WHATSAPP"
+
+
+class NotificationStatus(StrEnum):
+    PENDING = "PENDING"
+    QUEUED = "QUEUED"
+    SENT = "SENT"
+    RETRYING = "RETRYING"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class NotificationAttemptStatus(StrEnum):
+    SUCCEEDED = "SUCCEEDED"
+    TRANSIENT_FAILURE = "TRANSIENT_FAILURE"
+    PERMANENT_FAILURE = "PERMANENT_FAILURE"
+
+
 class ConcernSeverity(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"

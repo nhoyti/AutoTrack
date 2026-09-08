@@ -265,3 +265,11 @@ Sprint 5 is implemented in the backend with:
 - Date-only, odometer-only, whichever-comes-first, and whichever-comes-last
   schedule rules with deterministic evaluation
 - Active schedule supersession and append-only schedule state history
+
+Sprint 6 is implemented in the backend with:
+
+- Idempotent reminder generation for 30-day, 7-day, due-today, and overdue stages
+- Consent-aware preferred and fallback SMS, email, and WhatsApp delivery records
+- Customer timezone and quiet-hour policy enforcement with deferred dispatches
+- Provider adapters, delivery attempt history, exponential retry metadata, and permanent failure recording
+- Opt-out cancellation, provider IDs, webhook event records, and audit events
