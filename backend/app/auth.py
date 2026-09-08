@@ -115,7 +115,7 @@ def get_current_user(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication is required.",
+            detail={"code": "AUTHENTICATION_REQUIRED", "message": "Authentication is required."},
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -138,7 +138,7 @@ def get_current_user(
     except (ValueError, KeyError, StopIteration, TypeError, json.JSONDecodeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="The authentication token is invalid or expired.",
+            detail={"code": "AUTHENTICATION_REQUIRED", "message": "The authentication token is invalid or expired."},
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
 
@@ -148,7 +148,7 @@ def require_roles(*roles: StaffRole):
         if user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have permission to perform this action.",
+                detail={"code": "FORBIDDEN", "message": "You do not have permission to perform this action."},
             )
         return user
 

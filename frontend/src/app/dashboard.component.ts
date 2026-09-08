@@ -182,7 +182,9 @@ interface Inspection {
                   <li>
                     <button type="button" (click)="selectCustomer(customer)">
                       <strong>{{ customer.full_name }}</strong>
-                      <span>{{ customer.mobile_number ?? customer.email ?? "No contact" }}</span>
+                      <span>{{
+                        customer.mobile_number ?? customer.email ?? "No contact"
+                      }}</span>
                     </button>
                   </li>
                 }
@@ -204,7 +206,10 @@ interface Inspection {
                   <li>
                     <button type="button" (click)="selectVehicle(vehicle)">
                       <strong>{{ vehicle.plate_number }}</strong>
-                      <span>{{ vehicle.make ?? "Unknown" }} {{ vehicle.model ?? "model" }}</span>
+                      <span
+                        >{{ vehicle.make ?? "Unknown" }}
+                        {{ vehicle.model ?? "model" }}</span
+                      >
                     </button>
                   </li>
                 }
@@ -225,19 +230,33 @@ interface Inspection {
           <form class="stacked-form" (ngSubmit)="createCustomer()">
             <label>
               Full name
-              <input [(ngModel)]="newCustomer.full_name" name="customerName" required />
+              <input
+                [(ngModel)]="newCustomer.full_name"
+                name="customerName"
+                required
+              />
             </label>
             <label>
               Mobile
-              <input [(ngModel)]="newCustomer.mobile_number" name="customerMobile" />
+              <input
+                [(ngModel)]="newCustomer.mobile_number"
+                name="customerMobile"
+              />
             </label>
             <label>
               Email
-              <input [(ngModel)]="newCustomer.email" name="customerEmail" type="email" />
+              <input
+                [(ngModel)]="newCustomer.email"
+                name="customerEmail"
+                type="email"
+              />
             </label>
             <label>
               Preferred contact
-              <select [(ngModel)]="newCustomer.preferred_contact_method" name="customerPreference">
+              <select
+                [(ngModel)]="newCustomer.preferred_contact_method"
+                name="customerPreference"
+              >
                 <option value="SMS">SMS</option>
                 <option value="EMAIL">Email</option>
                 <option value="WHATSAPP">WhatsApp</option>
@@ -258,20 +277,32 @@ interface Inspection {
           <form class="stacked-form" (ngSubmit)="createVehicle()">
             <label>
               Customer
-              <select [(ngModel)]="newVehicle.customer_id" name="vehicleCustomerId">
+              <select
+                [(ngModel)]="newVehicle.customer_id"
+                name="vehicleCustomerId"
+              >
                 <option value="">Select a customer</option>
                 @for (customer of customers(); track customer.customer_id) {
-                  <option [value]="customer.customer_id">{{ customer.full_name }}</option>
+                  <option [value]="customer.customer_id">
+                    {{ customer.full_name }}
+                  </option>
                 }
               </select>
             </label>
             <label>
               Plate number
-              <input [(ngModel)]="newVehicle.plate_number" name="vehiclePlate" required />
+              <input
+                [(ngModel)]="newVehicle.plate_number"
+                name="vehiclePlate"
+                required
+              />
             </label>
             <label>
               VIN / Chassis
-              <input [(ngModel)]="newVehicle.vin_chassis_number" name="vehicleVin" />
+              <input
+                [(ngModel)]="newVehicle.vin_chassis_number"
+                name="vehicleVin"
+              />
             </label>
             <div class="two-col">
               <label>
@@ -286,7 +317,11 @@ interface Inspection {
             <div class="two-col">
               <label>
                 Year
-                <input [(ngModel)]="newVehicle.year" name="vehicleYear" type="number" />
+                <input
+                  [(ngModel)]="newVehicle.year"
+                  name="vehicleYear"
+                  type="number"
+                />
               </label>
               <label>
                 Color
@@ -313,39 +348,86 @@ interface Inspection {
             <p class="eyebrow">Sprint 3</p>
             <h3>Digital intake &amp; inspection</h3>
           </div>
-          <span class="date-label">{{ intake()?.status ?? "Not started" }}</span>
+          <span class="date-label">{{
+            intake()?.status ?? "Not started"
+          }}</span>
         </div>
         <p class="workflow-note">
-          Select a vehicle above to resume its draft intake. Photos stay private and expire after five minutes.
+          Select a vehicle above to resume its draft intake. Photos stay private
+          and expire after five minutes.
         </p>
         <div class="intake-grid">
           <form class="stacked-form" (ngSubmit)="saveIntake()">
             <label>
               Selected vehicle
-              <input [value]="selectedVehicle()?.plate_number ?? 'Choose a vehicle'" readonly />
+              <input
+                [value]="selectedVehicle()?.plate_number ?? 'Choose a vehicle'"
+                readonly
+              />
             </label>
             <label>
               Intake notes
-              <input [(ngModel)]="intakeNotes" name="intakeNotes" placeholder="Customer concerns or context" />
+              <input
+                [(ngModel)]="intakeNotes"
+                name="intakeNotes"
+                placeholder="Customer concerns or context"
+              />
             </label>
-            <button type="submit" [disabled]="!selectedVehicle()">{{ intake() ? "Resume intake" : "Start intake" }}</button>
+            <button type="submit" [disabled]="!selectedVehicle()">
+              {{ intake() ? "Resume intake" : "Start intake" }}
+            </button>
           </form>
           <form class="stacked-form" (ngSubmit)="saveInspection()">
-            <label>Vehicle area <input [(ngModel)]="concern.area" name="concernArea" required /></label>
-            <label>Condition <input [(ngModel)]="concern.condition" name="concernCondition" required /></label>
-            <label>Requested work <input [(ngModel)]="concern.requested_work" name="requestedWork" required /></label>
-            <label>Severity
+            <label
+              >Vehicle area
+              <input [(ngModel)]="concern.area" name="concernArea" required
+            /></label>
+            <label
+              >Condition
+              <input
+                [(ngModel)]="concern.condition"
+                name="concernCondition"
+                required
+            /></label>
+            <label
+              >Requested work
+              <input
+                [(ngModel)]="concern.requested_work"
+                name="requestedWork"
+                required
+            /></label>
+            <label
+              >Severity
               <select [(ngModel)]="concern.severity" name="concernSeverity">
-                <option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option>
+                <option>LOW</option>
+                <option>MEDIUM</option>
+                <option>HIGH</option>
+                <option>CRITICAL</option>
               </select>
             </label>
             <button type="submit" [disabled]="!intake()">Save concern</button>
           </form>
         </div>
         <div class="upload-row">
-          <label class="upload-control">Attach photo <input type="file" accept="image/jpeg,image/png,image/gif" (change)="uploadPhoto($event)" [disabled]="!inspection()" /></label>
-          @if (uploadState()) { <span>{{ uploadState() }}{{ uploadProgress() ? " " + uploadProgress() + "%" : "" }}</span> }
-          @if (lastUpload && uploadState() === "Upload failed") { <button type="button" class="retry-button" (click)="retryUpload()">Retry</button> }
+          <label class="upload-control"
+            >Attach photo
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/gif"
+              (change)="uploadPhoto($event)"
+              [disabled]="!inspection()"
+          /></label>
+          @if (uploadState()) {
+            <span
+              >{{ uploadState()
+              }}{{ uploadProgress() ? " " + uploadProgress() + "%" : "" }}</span
+            >
+          }
+          @if (lastUpload && uploadState() === "Upload failed") {
+            <button type="button" class="retry-button" (click)="retryUpload()">
+              Retry
+            </button>
+          }
         </div>
       </section>
     </main>
@@ -446,9 +528,14 @@ export class DashboardComponent {
   saveIntake(): void {
     const vehicle = this.selectedVehicle();
     if (!vehicle) return;
-    this.http.post<Intake>("/api/intakes", { vehicle_id: vehicle.vehicle_id, notes: this.intakeNotes }).subscribe({
-      next: (intake) => this.intake.set(intake),
-    });
+    this.http
+      .post<Intake>("/api/intakes", {
+        vehicle_id: vehicle.vehicle_id,
+        notes: this.intakeNotes,
+      })
+      .subscribe({
+        next: (intake) => this.intake.set(intake),
+      });
   }
 
   saveInspection(): void {
@@ -478,11 +565,20 @@ export class DashboardComponent {
     this.uploadProgress.set(0);
     const form = new FormData();
     form.append("file", file);
-    const request = new HttpRequest("POST", `/api/inspections/${inspection.inspection_id}/photos`, form, { reportProgress: true });
+    const request = new HttpRequest(
+      "POST",
+      `/api/inspections/${inspection.inspection_id}/photos`,
+      form,
+      { reportProgress: true },
+    );
     this.http.request(request).subscribe({
       next: (event) => {
-        if (event.type === HttpEventType.UploadProgress && event.total) this.uploadProgress.set(Math.round((event.loaded / event.total) * 100));
-        if (event.type === HttpEventType.Response) this.uploadState.set("Photo attached");
+        if (event.type === HttpEventType.UploadProgress && event.total)
+          this.uploadProgress.set(
+            Math.round((event.loaded / event.total) * 100),
+          );
+        if (event.type === HttpEventType.Response)
+          this.uploadState.set("Photo attached");
       },
       error: () => this.uploadState.set("Upload failed"),
     });
