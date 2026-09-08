@@ -1,0 +1,42 @@
+<div class="inspections">
+  <h2>Vehicle Intake & Inspection</h2>
+
+  <div class="inspection-workflow">
+    <!-- Vehicle Search/Selection -->
+    <div class="vehicle-section">
+      <label>Vehicle:</label>
+      <select [(ngModel)]="selectedVehicle" class="form-control">
+        <option value="">Select a vehicle</option>
+        <option *ngFor="let vehicle of vehicles" [value]="vehicle.id">
+          {{ vehicle.plate_number }} - {{ vehicle.make }} {{ vehicle.model }}
+        </option>
+      </select>
+    </div>
+
+    <!-- Inspection Form -->
+    <app-inspection-form
+      [vehicleId]="selectedVehicle"
+      [inspectionDate]="selectedInspection?.inspection_date"
+      [odometerReading]="selectedInspection?.odometer_reading"
+      [overallCondition]="selectedInspection?.overall_condition"
+      [customerNotes]="selectedInspection?.customer_notes"
+      [draftMode]="!selectedInspection"
+      (save)="onSaveInspection($event)"
+      (finalize)="onFinalizeInspection($event)">
+    </app-inspection-form>
+
+    <!-- Damage Map -->
+    <app-damage-map
+      [selectedItem]="selectedDamageItem"
+      (itemSelect)="onDamageItemSelect($event)"
+      (itemDeselect)="onDamageItemDeselect()">
+    </app-damage-map>
+
+    <!-- Photo Gallery -->
+    <app-photo-gallery
+      [photos]="uploadedPhotos"
+      (delete)="onPhotoDelete($event)"
+      (selectItem)="onPhotoSelect($event)">
+    </app-photo-gallery>
+  </div>
+</div>

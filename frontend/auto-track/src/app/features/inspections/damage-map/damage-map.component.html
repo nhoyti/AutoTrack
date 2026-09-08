@@ -1,0 +1,33 @@
+<div class="damage-map">
+  <h3>Damage Map Selector</h3>
+
+  <div class="map visually-hidden" aria-hidden="true">
+    <!-- Visual damage map layout -->
+  </div>
+
+  <div class="damage-list">
+    <div *ngFor="let item of damageAreas" class="damage-area"
+         [class.selected]="item.isSelected"
+         (click)="selectItem(item)"
+         [attr.aria-selected]="item.isSelected"
+         role="button"
+         tabindex="0"
+         (keydown.enter)="selectItem(item)"
+         (keydown.space)="selectItem(item)">
+
+      <span class="area-name">{{ item.vehicle_area }}</span>
+      <span *ngIf="item.isSelected" class="checkmark">✓</span>
+    </div>
+  </div>
+
+  <div *ngIf="selectedItem" class="selected-item">
+    <strong>Selected:</strong> {{ selectedItem?.vehicle_area }}
+    <span *ngIf="selectedItem.condition_type" class="condition-type"> - {{ selectedItem.condition_type }}</span>
+    <span *ngIf="selectedItem.severity" class="severity-level"> ({{ selectedItem.severity }})</span>
+    <button class="btn-deselect" (click)="deselectItem()">Deselect</button>
+  </div>
+
+  <div *ngIf="!selectedItem" class="hint">
+    Click on a damage area to select it
+  </div>
+</div>

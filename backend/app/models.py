@@ -1,31 +1,31 @@
 """SQLAlchemy models for AutoTrack."""
 
-from datetime import datetime, timezone
-from ...db import Base
+from datetime import datetime
+from sqlalchemy.orm import Mapped, mapped_column, declarative_base
+from sqlalchemy import Integer, String, Float, DateTime
+
+Base = declarative_base()
 
 
 class Customer(Base):
     """Customer model representing a shop customer."""
     __tablename__ = "customers"
 
-    id = Base.__declare_First__(type(__dict__))  # placeholder - actual declaration via __init_subclass__
-    __declare_last__(id, __name__)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    full_name: Mapped[str]
+    mobile_number: Mapped[str]
+    email: Mapped[str]
+    address: Mapped[str] = ""
 
-    # Core identity
-    full_name: str
-    mobile_number: str
-    email: str
-    address: str = ""
-    
     # Contact preferences
-    preferred_contact_method: str = "sms"  # sms, email, messenger, push
-    status: str = "active"  # active, inactive
-    
-    # Timestamps
-    created_at: datetime
-    updated_at: datetime
+    preferred_contact_method: Mapped[str] = "sms"  # sms, email, messenger, push
+    status: Mapped[str] = "active"  # active, inactive
 
-    # Relationships
+    # Timestamps
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
+
+    # Relationships (lazy loading strings for backward compat)
     vehicles = "list[Vehicle]"  # back-populated by Vehicle.customer relationship
 
 
@@ -33,23 +33,22 @@ class Vehicle(Base):
     """Vehicle model representing a customer's vehicle."""
     __tablename__ = "vehicles"
 
-    id: int
-    customer_id: int
-    plate_number: str
-    vin_chassis_number: str = ""
-    make: str
-    model: str
-    variant: str = ""
-    year: int
-    color: str = ""
-    fuel_type: str = ""
-    transmission: str = ""
-    current_odometer: float = 0.0
-    notes: str = ""
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int]
+    plate_number: Mapped[str]
+    vin_chassis_number: Mapped[str] = ""
+    make: Mapped[str]
+    model: Mapped[str]
+    variant: Mapped[str] = ""
+    year: Mapped[int]
+    color: Mapped[str] = ""
+    fuel_type: Mapped[str] = ""
+    transmission: Mapped[str] = ""
+    current_odometer: Mapped[float] = 0.0
+    notes: Mapped[str] = ""
+
     # Data quality: odometer tracking
-    # Every odometer reading stores its value, unit, recorded-at timestamp, and source record
-    
+
     # Relationships
     customer = "Customer"  # back_populates="vehicles"
     inspections = "list[Inspection]"  # back_populates="vehicle"
@@ -61,19 +60,19 @@ class Inspection(Base):
     """Inspection model recording vehicle condition at intake."""
     __tablename__ = "vehicle_inspections"
 
-    id: int
-    vehicle_id: int
-    inspection_date: datetime
-    odometer_reading: float
-    fuel_level: float = 100.0
-    overall_condition: str = ""  # e.g., "Excellent", "Good", "Fair", "Poor"
-    customer_notes: str = ""
-    technician_notes: str = ""
-    created_by: int = 0  # staff member ID
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vehicle_id: Mapped[int]
+    inspection_date: Mapped[datetime]
+    odometer_reading: Mapped[float]
+    fuel_level: Mapped[float] = 100.0
+    overall_condition: Mapped[str] = ""  # e.g., "Excellent", "Good", "Fair", "Poor"
+    customer_notes: Mapped[str] = ""
+    technician_notes: Mapped[str] = ""
+    created_by: Mapped[int] = 0  # staff member ID
+
     # Timestamps
-    created_at: datetime
-    updated_at: datetime
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
 
     # Relationships
     vehicle = "Vehicle"  # back_populates="inspections"
@@ -85,15 +84,15 @@ class InspectionItem(Base):
     """Individual concern item from a digital inspection."""
     __tablename__ = "inspection_items"
 
-    id: int
-    inspection_id: int
-    vehicle_area: str  # e.g., "Front Bumper", "Hood", etc.
-    condition_type: str  # e.g., SCRATCH, DENT, PAINT_FADE, etc.
-    severity: str  # e.g., MINOR, MODERATE, MAJOR, CRITICAL
-    requested_work: str = ""
-    technician_notes: str = ""
-    recommended_action: str = ""
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    inspection_id: Mapped[int]
+    vehicle_area: Mapped[str]  # e.g., "Front Bumper", "Hood", etc.
+    condition_type: Mapped[str]  # e.g., SCRATCH, DENT, PAINT_FADE, etc.
+    severity: Mapped[str]  # e.g., MINOR, MODERATE, MAJOR, CRITICAL
+    requested_work: Mapped[str] = ""
+    technician_notes: Mapped[str] = ""
+    recommended_action: Mapped[str] = ""
+
     # Relationships
     inspection = "Inspection"  # back_populates="items"
 
@@ -102,16 +101,16 @@ class InspectionPhoto(Base):
     """Photo linked to an inspection item."""
     __tablename__ = "inspection_photos"
 
-    id: int
-    inspection_item_id: int
-    storage_path: str  # Supabase storage key/path
-    photo_type: str = "inspection"  # inspection, paint_job, other
-    caption: str = ""
-    uploaded_by: int = 0  # staff member ID
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    inspection_item_id: Mapped[int]
+    storage_path: Mapped[str]  # Supabase storage key/path
+    photo_type: Mapped[str] = "inspection"  # inspection, paint_job, other
+    caption: Mapped[str] = ""
+    uploaded_by: Mapped[int] = 0  # staff member ID
+
     # Timestamps
-    created_at: datetime
-    
+    created_at: Mapped[datetime]
+
     # Relationships
     inspection_item = "InspectionItem"  # back_populates="photos"
 
@@ -120,25 +119,25 @@ class PaintJob(Base):
     """Paint/body repair job model."""
     __tablename__ = "paint_jobs"
 
-    id: int
-    vehicle_id: int
-    inspection_id: int
-    job_number: str  # Auto-generated
-    job_type: str = ""  # e.g., "Full panel repaint", "Spot repair"
-    description: str = ""
-    status: str = "DRAFT"  # DRAFT, INSPECTION, ESTIMATE, CUSTOMER_APPROVAL, SCHEDULED, IN_PROGRESS, QUALITY_CHECK, READY_FOR_RELEASE, COMPLETED, CANCELLED
-    estimated_cost: float = 0.0
-    approved_cost: float = 0.0
-    actual_cost: float = 0.0
-    scheduled_start: datetime = None
-    scheduled_end: datetime = None
-    actual_completion_date: datetime = None
-    customer_notes: str = ""
-    technician_notes: str = ""
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vehicle_id: Mapped[int]
+    inspection_id: Mapped[int]
+    job_number: Mapped[str]  # Auto-generated
+    job_type: Mapped[str] = ""  # e.g., "Full panel repaint", "Spot repair"
+    description: Mapped[str] = ""
+    status: Mapped[str] = "DRAFT"  # DRAFT, INSPECTION, ESTIMATE, CUSTOMER_APPROVAL, SCHEDULED, IN_PROGRESS, QUALITY_CHECK, READY_FOR_RELEASE, COMPLETED, CANCELLED
+    estimated_cost: Mapped[float] = 0.0
+    approved_cost: Mapped[float] = 0.0
+    actual_cost: Mapped[float] = 0.0
+    scheduled_start: Mapped[datetime] = None
+    scheduled_end: Mapped[datetime] = None
+    actual_completion_date: Mapped[datetime] = None
+    customer_notes: Mapped[str] = ""
+    technician_notes: Mapped[str] = ""
+
     # Status history audit
-    created_at: datetime
-    updated_at: datetime
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
 
     # Relationships
     vehicle = "Vehicle"  # back_populates="paint_jobs"
@@ -151,17 +150,17 @@ class PaintJobItem(Base):
     """Individual item within a paint job."""
     __tablename__ = "paint_job_items"
 
-    id: int
-    paint_job_id: int
-    vehicle_area: str
-    service_type: str = ""  # e.g., SANDING, BODY_REPAIR, DENT_REPAIR, etc.
-    description: str = ""
-    labor_cost: float = 0.0
-    material_cost: float = 0.0
-    quantity: int = 1
-    total_cost: float = 0.0
-    status: str = "pending"  # pending, in_progress, completed
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paint_job_id: Mapped[int]
+    vehicle_area: Mapped[str]
+    service_type: Mapped[str] = ""  # e.g., SANDING, BODY_REPAIR, DENT_REPAIR, etc.
+    description: Mapped[str] = ""
+    labor_cost: Mapped[float] = 0.0
+    material_cost: Mapped[float] = 0.0
+    quantity: Mapped[int] = 1
+    total_cost: Mapped[float] = 0.0
+    status: Mapped[str] = "pending"  # pending, in_progress, completed
+
     # Relationships
     paint_job = "PaintJob"  # back_populates="items"
 
@@ -170,33 +169,33 @@ class PaintJobStatusHistory(Base):
     """Audit trail for paint job status changes."""
     __tablename__ = "paint_job_status_history"
 
-    id: int
-    paint_job_id: int
-    previous_status: str
-    new_status: str
-    actor: int  # staff member ID
-    occurred_at: datetime
-    reason: str = ""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paint_job_id: Mapped[int]
+    previous_status: Mapped[str]
+    new_status: Mapped[str]
+    actor: Mapped[int]  # staff member ID
+    occurred_at: Mapped[datetime]
+    reason: Mapped[str] = ""
 
 
 class ServiceRecord(Base):
     """PMS service record model."""
     __tablename__ = "service_records"
 
-    id: int
-    vehicle_id: int
-    service_date: datetime
-    odometer_reading: float
-    service_type: str = ""  # e.g., PMS, OIL_CHANGE, BRAKE_SERVICE, etc.
-    description: str = ""
-    completed_at: datetime = None
-    completed_by: int = 0  # staff member ID
-    status: str = "DRAFT"  # DRAFT, COMPLETED, CANCELLED
-    labor_cost: float = 0.0
-    parts_cost: float = 0.0
-    total_cost: float = 0.0
-    recommendations: str = ""
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vehicle_id: Mapped[int]
+    service_date: Mapped[datetime]
+    odometer_reading: Mapped[float]
+    service_type: Mapped[str] = ""  # e.g., PMS, OIL_CHANGE, BRAKE_SERVICE, etc.
+    description: Mapped[str] = ""
+    completed_at: Mapped[datetime] = None
+    completed_by: Mapped[int] = 0  # staff member ID
+    status: Mapped[str] = "DRAFT"  # DRAFT, COMPLETED, CANCELLED
+    labor_cost: Mapped[float] = 0.0
+    parts_cost: Mapped[float] = 0.0
+    total_cost: Mapped[float] = 0.0
+    recommendations: Mapped[str] = ""
+
     # Relationships
     vehicle = "Vehicle"  # back_populates="service_records"
     items = "list[ServiceItem]"  # back_populates="service_record"
@@ -208,16 +207,16 @@ class ServiceItem(Base):
     """Individual item within a service record."""
     __tablename__ = "service_items"
 
-    id: int
-    service_record_id: int
-    service_category: str = ""  # e.g., LABOR, PARTS, DIAGNOSTIC, etc.
-    description: str = ""
-    status: str = "pending"  # pending, completed
-    cost: float = 0.0
-    next_due_odometer: float = 0.0
-    next_due_date: datetime = None
-    rule_type: str = "ODOMETER_ONLY"  # DATE_ONLY, ODOMETER_ONLY, WHICHEVER_COMES_FIRST, WHICHEVER_COMES_LAST
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service_record_id: Mapped[int]
+    service_category: Mapped[str] = ""  # e.g., LABOR, PARTS, DIAGNOSTIC, etc.
+    description: Mapped[str] = ""
+    status: Mapped[str] = "pending"  # pending, completed
+    cost: Mapped[float] = 0.0
+    next_due_odometer: Mapped[float] = 0.0
+    next_due_date: Mapped[datetime] = None
+    rule_type: Mapped[str] = "ODOMETER_ONLY"  # DATE_ONLY, ODOMETER_ONLY, WHICHEVER_COMES_FIRST, WHICHEVER_COMES_LAST
+
     # Relationships
     service_record = "ServiceRecord"  # back_populates="items"
 
@@ -226,14 +225,14 @@ class ServicePart(Base):
     """Part used in a service record."""
     __tablename__ = "service_parts"
 
-    id: int
-    service_record_id: int
-    part_name: str
-    part_number: str = ""
-    quantity: int = 1
-    unit_cost: float = 0.0
-    total_cost: float = 0.0
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service_record_id: Mapped[int]
+    part_name: Mapped[str]
+    part_number: Mapped[str] = ""
+    quantity: Mapped[int] = 1
+    unit_cost: Mapped[float] = 0.0
+    total_cost: Mapped[float] = 0.0
+
     # Relationships
     service_record = "ServiceRecord"  # back_populates="parts"
 
@@ -242,22 +241,22 @@ class MaintenanceSchedule(Base):
     """Maintenance schedule generated from a service record."""
     __tablename__ = "maintenance_schedules"
 
-    id: int
-    vehicle_id: int
-    service_record_id: int
-    maintenance_type: str = ""  # e.g., OIL_CHANGE, BRAKE_INSPECTION, etc.
-    due_date: datetime
-    due_odometer: float
-    interval_months: int = 0
-    interval_km: float = 0.0
-    rule_type: str = "WHICHEVER_COMES_FIRST"  # DATE_ONLY, ODOMETER_ONLY, WHICHEVER_COMES_FIRST, WHICHEVER_COMES_LAST
-    status: str = "PLANNED"  # PLANNED, DUE, OVERDUE, COMPLETED, SKIPPED, CANCELLED
-    source_service_item_id: int = 0
-    completed_at: datetime = None
-    completed_by: int = 0  # staff member ID
-    superseded_by_schedule_id: int = 0
-    notes: str = ""
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vehicle_id: Mapped[int]
+    service_record_id: Mapped[int]
+    maintenance_type: Mapped[str] = ""  # e.g., OIL_CHANGE, BRAKE_INSPECTION, etc.
+    due_date: Mapped[datetime]
+    due_odometer: Mapped[float]
+    interval_months: Mapped[int] = 0
+    interval_km: Mapped[float] = 0.0
+    rule_type: Mapped[str] = "WHICHEVER_COMES_FIRST"  # DATE_ONLY, ODOMETER_ONLY, WHICHEVER_COMES_FIRST, WHICHEVER_COMES_LAST
+    status: Mapped[str] = "PLANNED"  # PLANNED, DUE, OVERDUE, COMPLETED, SKIPPED, CANCELLED
+    source_service_item_id: Mapped[int] = 0
+    completed_at: Mapped[datetime] = None
+    completed_by: Mapped[int] = 0  # staff member ID
+    superseded_by_schedule_id: Mapped[int] = 0
+    notes: Mapped[str] = ""
+
     # Relationships
     vehicle = "Vehicle"  # back_populates="schedules"
     source_service_record = "ServiceRecord"  # back_populates="schedules"
@@ -267,17 +266,17 @@ class MaintenanceReminder(Base):
     """Reminder business event for a maintenance schedule."""
     __tablename__ = "maintenance_reminders"
 
-    id: int
-    maintenance_schedule_id: int
-    customer_id: int
-    vehicle_id: int
-    stage: str = ""  # 30_DAYS, 7_DAYS, DUE_TODAY, OVERDUE
-    scheduled_for: datetime
-    generated_at: datetime
-    status: str = "PENDING"  # PENDING, SENT, CANCELLED
-    cancelled_at: datetime = None
-    cancelled_reason: str = ""
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    maintenance_schedule_id: Mapped[int]
+    customer_id: Mapped[int]
+    vehicle_id: Mapped[int]
+    stage: Mapped[str] = ""  # 30_DAYS, 7_DAYS, DUE_TODAY, OVERDUE
+    scheduled_for: Mapped[datetime]
+    generated_at: Mapped[datetime]
+    status: Mapped[str] = "PENDING"  # PENDING, SENT, CANCELLED
+    cancelled_at: Mapped[datetime] = None
+    cancelled_reason: Mapped[str] = ""
+
     # Relationships
     maintenance_schedule = "MaintenanceSchedule"
     customer = "Customer"
@@ -288,40 +287,40 @@ class CustomerNotificationPreferences(Base):
     """Customer notification preference settings."""
     __tablename__ = "customer_notification_preferences"
 
-    id: int
-    customer_id: int
-    sms_enabled: bool = True
-    email_enabled: bool = True
-    messenger_enabled: bool = True
-    push_enabled: bool = True
-    pms_reminders_enabled: bool = True
-    marketing_enabled: bool = False
-    timezone: str = "UTC"
-    quiet_hours_start: str = "22:00"
-    quiet_hours_end: str = "06:00"
-    created_at: datetime
-    updated_at: datetime
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int]
+    sms_enabled: Mapped[bool] = True
+    email_enabled: Mapped[bool] = True
+    messenger_enabled: Mapped[bool] = True
+    push_enabled: Mapped[bool] = True
+    pms_reminders_enabled: Mapped[bool] = True
+    marketing_enabled: Mapped[bool] = False
+    timezone: Mapped[str] = "UTC"
+    quiet_hours_start: Mapped[str] = "22:00"
+    quiet_hours_end: Mapped[str] = "06:00"
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
 
 
 class Notification(Base):
     """Channel-specific notification delivery attempt."""
     __tablename__ = "notifications"
 
-    id: int
-    customer_id: int
-    vehicle_id: int
-    maintenance_schedule_id: int = 0
-    reminder_id: int = 0
-    channel: str = ""  # SMS, EMAIL, MESSENGER_WHATSAPP
-    stage: str = ""  # 30_DAYS, 7_DAYS, DUE_TODAY, OVERDUE
-    scheduled_at: datetime
-    sent_at: datetime = None
-    attempt_count: int = 0
-    next_attempt_at: datetime = None
-    status: str = "PENDING"  # PENDING, PROCESSING, SENT, FAILED, CANCELLED
-    provider_message_id: str = ""
-    error_message: str = ""
-    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int]
+    vehicle_id: Mapped[int]
+    maintenance_schedule_id: Mapped[int] = 0
+    reminder_id: Mapped[int] = 0
+    channel: Mapped[str] = ""  # SMS, EMAIL, MESSENGER_WHATSAPP
+    stage: Mapped[str] = ""  # 30_DAYS, 7_DAYS, DUE_TODAY, OVERDUE
+    scheduled_at: Mapped[datetime]
+    sent_at: Mapped[datetime] = None
+    attempt_count: Mapped[int] = 0
+    next_attempt_at: Mapped[datetime] = None
+    status: Mapped[str] = "PENDING"  # PENDING, PROCESSING, SENT, FAILED, CANCELLED
+    provider_message_id: Mapped[str] = ""
+    error_message: Mapped[str] = ""
+
     # Relationships
     customer = "Customer"
     vehicle = "Vehicle"
@@ -331,27 +330,27 @@ class NotificationAttempt(Base):
     """Individual provider call attempt for a notification."""
     __tablename__ = "notification_attempts"
 
-    id: int
-    notification_id: int
-    attempt_number: int
-    attempted_at: datetime
-    status: str = "PROCESSING"  # PROCESSING, SENT, FAILED
-    provider_message_id: str = ""
-    error_code: str = ""
-    error_message: str = ""
-    response_reference: str = ""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    notification_id: Mapped[int]
+    attempt_number: Mapped[int]
+    attempted_at: Mapped[datetime]
+    status: Mapped[str] = "PROCESSING"  # PROCESSING, SENT, FAILED
+    provider_message_id: Mapped[str] = ""
+    error_code: Mapped[str] = ""
+    error_message: Mapped[str] = ""
+    response_reference: Mapped[str] = ""
+
+    # Relationships
 
 
 class Technician(Base):
     """Technician/staff user model."""
     __tablename__ = "users"  # Using 'users' to avoid clash with Python 'user'
 
-    id: int
-    full_name: str
-    email: str
-    role: str = "TECHNICIAN_PAINTER"  # ADMIN_MANAGER, SERVICE_ADVISOR, TECHNICIAN_PAINTER, READ_ONLY
-    is_active: bool = True
-    created_at: datetime
-    updated_at: datetime
-EOF
-echo "Done"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    full_name: Mapped[str]
+    email: Mapped[str]
+    role: Mapped[str] = "TECHNICIAN_PAINTER"  # ADMIN_MANAGER, SERVICE_ADVISOR, TECHNICIAN_PAINTER, READ_ONLY
+    is_active: Mapped[bool] = True
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]

@@ -251,6 +251,29 @@ async def create_inspection(
             "overall_condition": inspection.overall_condition}
 
 
+@inspections_router.post("/{inspection_id}/photos", status_code=status.HTTP_201_CREATED)
+async def upload_inspection_photos(
+    inspection_id: int,
+    photos: list = [],
+    db: Session = Depends(get_db),
+):
+    """Upload photos for an inspection item."""
+    from ...app.models import InspectionPhoto
+
+    for photo in photos:
+        inspection_photo = InspectionPhoto(
+            inspection_item_id=inspection_id,
+            storage_path=photo.get("storage_path", ""),
+            photo_type=photo.get("photo_type", "inspection"),
+            caption=photo.get("caption", ""),
+            uploaded_by=photo.get("uploaded_by", 0),
+        )
+        db.add(inspection_photo)
+    db.commit()
+
+    return {"message": f"{len(photos)} photos uploaded successfully"}
+
+
 @inspections_router.get("/{inspection_id}/photos")
 async def list_inspection_photos(
     inspection_id: int,

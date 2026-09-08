@@ -1,8 +1,24 @@
-🏗️ Sprint 0: Infrastructure & Foundation (1 week)
-Setup & Configuration
-•	 Project initialization (Angular + FastAPI + Supabase/PostgreSQL)
-•	 Environment configuration and secrets management
-•	 Database schema setup (initial tables: customers, vehicles, users/technicians)
-•	 Supabase Storage bucket configuration for photos/documents
-•	 CI/CD pipeline basic structure
-•	 Basic authentication scaffolding (Supabase Auth)
+Sprint 1: Customer & Vehicle Management (1 week)
+Core Functionality
+•	Customer CRUD operations
+•	Vehicle CRUD operations (with immutable vehicle_id)
+•	Customer-to-vehicle relationship (1:N)
+•	Search functionality (by name, mobile, email, plate, VIN)
+API Endpoints
+•	GET/POST /api/customers
+•	GET/POST /api/vehicles
+•	GET /api/vehicles?query={plate|vin|customer_id}
+Angular Features
+•	features/customers/customer-list/
+•	features/customers/customer-detail/
+•	features/customers/customer-form/
+•	features/vehicles/vehicle-list/
+•	features/vehicles/vehicle-detail/
+•	features/vehicles/vehicle-form/
+Database Tables
+•	customers (id, full_name, mobile_number, email, address, preferred_contact_method, notes, status, created_at, updated_at)
+•	vehicles (id, customer_id, plate_number, vin_chassis_number, make, model, variant, year, color, fuel_type, transmission, current_odometer, notes, created_at, updated_at)
+Key Rules Implemented
+•	Plate number NOT used as primary key (uses immutable vehicle_id)
+•	VIN/chassis searchable but optional
+•	Odometer data-quality rules (derived, not free-form)

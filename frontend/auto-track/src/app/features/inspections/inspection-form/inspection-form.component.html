@@ -1,0 +1,70 @@
+<div class="inspection-form">
+  <h2>{{ draftMode ? 'Create Inspection (Draft)' : 'Finalize Inspection' }}</h2>
+
+  <div class="form-section">
+    <label>Inspection Date</label>
+    <input type="date" [(ngModel)]="inspectionDate" class="form-control">
+
+    <label>Odometer Reading</label>
+    <input type="number" [(ngModel)]="odometerReading" placeholder="0.0" class="form-control">
+
+    <label>Overall Condition</label>
+    <select [(ngModel)]="overallCondition" class="form-control">
+      <option value="">Select condition</option>
+      <option value="Excellent">Excellent</option>
+      <option value="Good">Good</option>
+      <option value="Fair">Fair</option>
+      <option value="Poor">Poor</option>
+    </select>
+
+    <label>Customer Notes</label>
+    <textarea [(ngModel)]="customerNotes" rows="3" class="form-control" placeholder="Enter customer notes..."></textarea>
+  </div>
+
+  <div class="items-section">
+    <h3>Concern Items</h3>
+
+    <div *ngIf="inspectionItems.length === 0" class="empty-state">
+      No items added yet. Click "Add Item" to begin.
+    </div>
+
+    <div *ngFor="let item of inspectionItems; let i = index" class="item-row">
+      <div class="item-field">
+        <label>Area</label>
+        <input type="text" [(ngModel)]="item.vehicle_area" class="form-control" placeholder="e.g., Front Bumper">
+      </div>
+      <div class="item-field">
+        <label>Condition Type</label>
+        <input type="text" [(ngModel)]="item.condition_type" class="form-control" placeholder="e.g., SCRATCH, DENT">
+      </div>
+      <div class="item-field">
+        <label>Severity</label>
+        <select [(ngModel)]="item.severity" class="form-control">
+          <option value="MINOR">MINOR</option>
+          <option value="MODERATE">MODERATE</option>
+          <option value="MAJOR">MAJOR</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </div>
+      <div class="item-field">
+        <label>Requested Work</label>
+        <input type="text" [(ngModel)]="item.requested_work" class="form-control" placeholder="e.g., Polish, Replace">
+      </div>
+      <div class="item-field">
+        <label>Technician Notes</label>
+        <textarea [(ngModel)]="item.technician_notes" rows="2" class="form-control" placeholder="Technician notes..."></textarea>
+      </div>
+      <div class="item-field">
+        <label>Recommended Action</label>
+        <input type="text" [(ngModel)]="item.recommended_action" class="form-control" placeholder="e.g., Detail, Repair">
+      </div>
+      <button type="button" class="btn-remove" (click="removeItem(i)">Remove</button>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn-save" (click)="onSave()">Save as Draft</button>
+    <button type="button" class="btn-finalize" (click)="onFinalize()">Finalize Inspection</button>
+    <button type="button" class="btn-add-item" (click)="addItem()">Add Item</button>
+  </div>
+</div>

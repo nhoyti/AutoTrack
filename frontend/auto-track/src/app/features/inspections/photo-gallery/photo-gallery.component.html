@@ -1,0 +1,38 @@
+<div class="photo-gallery">
+  <h3>Photo Gallery</h3>
+
+  <div *ngIf="photos.length === 0" class="empty-state">
+    No photos uploaded yet. Use the upload feature to add photos.
+  </div>
+
+  <div class="photo-grid" *ngFor="let photo of photos">
+    <div class="photo-item">
+      <img
+        *ngIf="photo.photo_type !== 'other'"
+        [src]="photo.storage_path"
+        [alt]="photo.caption || 'Inspection photo'"
+        class="photo-thumbnail"
+        (click)="onSelect(photo.id)">
+
+      <img
+        *ngIf="photo.photo_type === 'other'"
+        [src]="photo.storage_path"
+        [alt]="photo.caption || 'Other photo'"
+        class="photo-thumbnail"
+        (click)="onSelect(photo.id)">
+
+      <div class="photo-info">
+        <span class="photo-caption">{{ photo.caption || 'No caption' }}</span>
+        <span class="photo-type">{{ photo.photo_type }}</span>
+      </div>
+
+      <button class="photo-delete" (click)="$event.stopPropagation(); onDelete(photo.id)">
+        ×
+      </button>
+    </div>
+  </div>
+
+  <p class="photo-count">
+    {{ photos.length }} photo{{ photos.length !== 1 ? 's' : '' }}
+  </p>
+</div>
