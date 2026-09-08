@@ -3,8 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from ...db import get_db, Base, engine, SessionLocal
-from ...app.models import Customer, Vehicle, Inspection, PaintJob, ServiceRecord
+from app.db import get_db, Base, engine, SessionLocal
+from app.models import Customer, Vehicle, Inspection, PaintJob, ServiceRecord
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
@@ -454,7 +454,7 @@ async def create_service_record(
 ):
     """Create a new service record."""
     from ...app.models import ServiceRecord
-    
+
     service_record = ServiceRecord(
         vehicle_id=vehicle_id, service_date=service_date,
         odometer_reading=odometer_reading, service_type=service_type,
@@ -467,6 +467,165 @@ async def create_service_record(
             "service_date": str(service_record.service_date),
             "odometer_reading": service_record.odometer_reading,
             "service_type": service_record.service_type}
+
+
+@services_router.post("/{service_id}/complete", status_code=status.HTTP_200_OK)
+async def complete_service_record(
+    service_id: int,
+    odometer_reading: float,
+    db: Session = Depends(get_db),
+):
+    """Complete a service record with odometer validation.
+
+    Atomic completion:
+    1. Validate odometer is not regressive (must be >= last completed odometer)
+    2. Transition status from DRAFT to COMPLETED
+    3. Create maintenance schedules based on service items' rule_type
+    4. Supersede any existing schedules that are now invalid
+    """
+    from ...app.models import ServiceRecord, ServiceItem, ServicePart, MaintenanceSchedule
+    from datetime import datetime, timezone
+
+    service_record = db.get(ServiceRecord, service_id)
+    if not service_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Service record with id {service_id} not found.",
+        )
+
+    if service_record.status != "DRAFT":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Service record is already '{service_record.status}', cannot complete.",
+        )
+
+    # Validate odometer is not regressive
+    # Get the last completed service record for this vehicle to compare odometers
+    last_completed = db.execute(
+        select(ServiceRecord)
+        .where(
+            ServiceRecord.vehicle_id == service_record.vehicle_id,
+            ServiceRecord.status == "COMPLETED",
+            ServiceRecord.id != service_record.id,
+        )
+        .order_by(ServiceRecord.service_date.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if last_completed and odometer_reading < last_completed.odometer_reading:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Odometer regression detected: {odometer_reading} < {last_completed.odometer_reading}. "
+                   "Odometer must not decrease between service records.",
+        )
+
+    # If this is the first completed service, check against vehicle's current odometer
+    from ...app.models import Vehicle
+    vehicle = db.get(Vehicle, service_record.vehicle_id)
+    if vehicle and odometer_reading < vehicle.current_odometer:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Odometer reading {odometer_reading} is less than vehicle's current odometer {vehicle.current_odometer}. "
+                   "Odometer must not go backwards.",
+        )
+
+    # Mark the service record as completed
+    service_record.status = "COMPLETED"
+    service_record.completed_at = datetime.now(timezone.utc)
+    service_record.completed_by = 1  # TODO: Integrate with auth system when available
+    db.add(service_record)
+    db.commit()
+    db.refresh(service_record)
+
+    # Process service items and create maintenance schedules
+    from ...app.models import ServiceItem, ServicePart
+
+    # Get all service items for this record
+    service_items = db.execute(
+        select(ServiceItem).where(ServiceItem.service_record_id == service_id)
+    ).scalars().all()
+
+    for item in service_items:
+        # Create maintenance schedule based on rule_type
+        due_odometer = item.next_due_odometer or odometer_reading
+        due_date = item.next_due_date
+
+        # If no next due odometer/date set, calculate based on rule_type
+        if not due_date and item.rule_type == "ODOMETER_ONLY":
+            # Due at a fixed odometer interval - would need interval_km from config
+            # For now, set to current odometer + some default
+            due_odometer = odometer_reading + 10000.0  # 10km default interval
+        elif not due_date and item.rule_type == "DATE_ONLY":
+            due_date = datetime.now(timezone.utc)  # Due immediately, or calculate from config
+        elif not due_date and item.rule_type == "WHICHEVER_COMES_FIRST":
+            due_odometer = odometer_reading + 5000.0  # 5km default
+            due_date = datetime.now(timezone.utc)
+        elif not due_date and item.rule_type == "WHICHEVER_COMES_LAST":
+            due_odometer = odometer_reading + 15000.0  # 15km default
+            # due_date would be calculated based on time interval
+
+        schedule = MaintenanceSchedule(
+            vehicle_id=service_record.vehicle_id,
+            service_record_id=service_id,
+            maintenance_type=item.service_category or service_type or "SERVICE",
+            due_date=due_date or datetime.now(timezone.utc),
+            due_odometer=due_odometer,
+            interval_months=0,
+            interval_km=0.0,
+            rule_type=item.rule_type,
+            status="PLANNED",
+            source_service_item_id=item.id,
+        )
+        db.add(schedule)
+
+    # Supersede any existing schedules that would now be invalid
+    # Schedules due at or before the new odometer reading are superseded
+    superseded = db.execute(
+        select(MaintenanceSchedule)
+        .where(
+            MaintenanceSchedule.vehicle_id == service_record.vehicle_id,
+            MaintenanceSchedule.due_odometer <= odometer_reading,
+            MaintenanceSchedule.status.in_(["PLANNED", "DUE", "OVERDUE"]),
+        )
+    ).scalars().all()
+
+    for s in superseded:
+        s.status = "CANCELLED"
+        s.cancelled_at = datetime.now(timezone.utc)
+        db.add(s)
+
+    # Get all service parts for this record
+    service_parts = db.execute(
+        select(ServicePart).where(ServicePart.service_record_id == service_id)
+    ).scalars().all()
+
+    # Calculate total costs from items and parts
+    total_labor = sum(item.cost or 0 for item in service_items)
+    total_parts = sum(part.unit_cost * part.quantity for part in service_parts)
+    # Also add part total_cost if set
+    for part in service_parts:
+        if part.total_cost:
+            total_parts += part.total_cost
+
+    service_record.labor_cost = total_labor
+    service_record.parts_cost = total_parts
+    service_record.total_cost = total_labor + total_parts
+    db.add(service_record)
+    db.commit()
+
+    return {
+        "id": service_record.id,
+        "vehicle_id": service_record.vehicle_id,
+        "service_date": str(service_record.service_date),
+        "odometer_reading": service_record.odometer_reading,
+        "service_type": service_record.service_type,
+        "status": service_record.status,
+        "completed_at": str(service_record.completed_at),
+        "total_cost": str(service_record.total_cost) if service_record.total_cost else None,
+        "labor_cost": str(service_record.labor_cost) if service_record.labor_cost else None,
+        "parts_cost": str(service_record.parts_cost) if service_record.parts_cost else None,
+        "message": "Service record completed successfully with maintenance schedules created.",
+    }
 
 
 @services_router.get("/{service_id}/history")

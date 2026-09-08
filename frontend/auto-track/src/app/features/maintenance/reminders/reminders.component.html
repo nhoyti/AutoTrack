@@ -1,0 +1,34 @@
+<div class="reminders-page">
+  <h2>PMS Reminders</h2>
+
+  <div *ngIf="vehicleId" class="vehicle-info">
+    <p>Vehicle: {{ vehicle?.make }} {{ vehicle?.model }} ({{ vehicle?.plate_number }})</p>
+  </div>
+
+  <div *ngIf="reminders && reminders.length > 0" class="reminders-list">
+    <p>Total reminders: {{ reminders.length }}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Scheduled For</th>
+          <th>Status</th>
+          <th>Generated</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let reminder of reminders">
+          <td>{{ reminder.stage }}</td>
+          <td>{{ reminder.scheduled_for | date:'short' }}</td>
+          <td>{{ reminder.status }}</td>
+          <td>{{ reminder.generated_at | date:'short' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div *ngIf="!reminders || reminders.length === 0" class="no-reminders">
+    <p>No active reminders.</p>
+    <p *ngIf="vehicleId">Create a service record first to generate maintenance schedules and reminders.</p>
+  </div>
+</div>

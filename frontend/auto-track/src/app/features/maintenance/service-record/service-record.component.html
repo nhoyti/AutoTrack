@@ -1,0 +1,42 @@
+<div class="service-record-page">
+  <h2>Service Record</h2>
+
+  <div *ngIf="vehicleId" class="vehicle-info">
+    <p>Vehicle: {{ vehicle?.make }} {{ vehicle?.model }} ({{ vehicle?.plate_number }})</p>
+  </div>
+
+  <div *ngIf="serviceRecord" class="service-record-detail">
+    <p><strong>Service Type:</strong> {{ serviceRecord.service_type }}</p>
+    <p><strong>Status:</strong> {{ serviceRecord.status }}</p>
+    <p><strong>Service Date:</strong> {{ serviceRecord.service_date | date:'short' }}</p>
+    <p><strong>Odometer:</strong> {{ serviceRecord.odometer_reading | odoPipe }} km</p>
+    <p><strong>Description:</strong> {{ serviceRecord.description }}</p>
+  </div>
+
+  <div *ngIf="!serviceRecord" class="create-service">
+    <h3>Create New Service Record</h3>
+    <form (ngSubmit)="onCreate()" novalidate>
+      <div class="form-group">
+        <label>Vehicle ID</label>
+        <input type="number" [(ngModel)]="vehicleId" placeholder="Vehicle ID" required />
+      </div>
+      <div class="form-group">
+        <label>Service Type</label>
+        <input type="text" [(ngModel)]="serviceType" placeholder="e.g., PMS, OIL_CHANGE" required />
+      </div>
+      <div class="form-group">
+        <label>Service Date</label>
+        <input type="date" [(ngModel)]="serviceDate" required />
+      </div>
+      <div class="form-group">
+        <label>Odometer Reading</label>
+        <input type="number" [(ngModel)]="odometerReading" placeholder="Odometer reading" required />
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea [(ngModel)]="description" placeholder="Service description"></textarea>
+      </div>
+      <button type="submit" class="btn-primary">Create Service Record</button>
+    </form>
+  </div>
+</div>
