@@ -1,3 +1,2 @@
-Build it as a sequence of business flows:
-
-Customer → Vehicle → Inspection → Job → Service → Reminder → Notification → Dashboard
+create a section werein it display data of customers in a gridview 
+    - it has the functionality to update or edit and delete functionality customer details in a small popup
