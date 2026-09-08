@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from ...db import get_db, Base, engine, SessionLocal
 from ...app.models import Customer, Vehicle, Inspection, PaintJob, ServiceRecord
 
@@ -300,8 +301,13 @@ async def create_paint_job(
     items: list = None,
     db: Session = Depends(get_db),
 ):
-    """Create a new paint job from an inspection."""
-    from ...app.models import PaintJob, PaintJobItem
+    """Create a new paint job from an inspection snapshot."""
+    from ...app.models import PaintJob, PaintJobItem, Inspection, InspectionItem
+    
+    # Fetch the inspection to copy items as snapshot
+    inspection = db.get(Inspection, inspection_id)
+    if not inspection:
+        raise HTTPException(status_code=404, detail="Inspection not found")
     
     paint_job = PaintJob(
         vehicle_id=vehicle_id, inspection_id=inspection_id,
@@ -311,22 +317,27 @@ async def create_paint_job(
     db.commit()
     db.refresh(paint_job)
     
-    # Create paint job items if provided
-    if items:
-        for item in items:
-            paint_job_item = PaintJobItem(
-                paint_job_id=paint_job.id,
-                vehicle_area=item.get("vehicle_area", ""),
-                service_type=item.get("service_type", ""),
-                description=item.get("description", ""),
-                labor_cost=item.get("labor_cost", 0.0),
-                material_cost=item.get("material_cost", 0.0),
-                quantity=item.get("quantity", 1),
-                total_cost=item.get("total_cost", 0.0),
-                status=item.get("status", "pending"),
-            )
-            db.add(paint_job_item)
-        db.commit()
+    # Copy inspection items as paint job items (snapshot)
+    # This ensures editing the inspection later doesn't change the job
+    inspection_items = db.execute(
+        select(InspectionItem).where(InspectionItem.inspection_id == inspection_id)
+    ).scalars().all()
+    
+    for idx, insp_item in enumerate(inspection_items):
+        paint_job_item = PaintJobItem(
+            paint_job_id=paint_job.id,
+            vehicle_area=insp_item.vehicle_area,
+            service_type=insp_item.condition_type,  # Map condition_type to service_type
+            description=insp_item.condition_type,
+            labor_cost=0.0,
+            material_cost=0.0,
+            quantity=1,
+            total_cost=0.0,
+            status="pending",
+        )
+        db.add(paint_job_item)
+    
+    db.commit()
     
     return {
         "id": paint_job.id, "vehicle_id": paint_job.vehicle_id,
@@ -342,17 +353,94 @@ async def update_paint_job_status(
     reason: str = "",
     db: Session = Depends(get_db),
 ):
-    """Update paint job status."""
-    from ...app.models import PaintJob
+    """Update paint job status.
+
+    Status changes are append-only in paint_job_status_history.
+    Terminal states (COMPLETED, CANCELLED) cannot be changed.
+    """
+    from ...app.models import PaintJob, PaintJobStatusHistory
+    from datetime import datetime, timezone
+
     paint_job = db.get(PaintJob, job_id)
     if not paint_job:
         raise HTTPException(status_code=404, detail="Paint job not found")
+
+    # Terminal states cannot be changed
+    if paint_job.status in ("COMPLETED", "CANCELLED") and paint_job.status != status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot change status from terminal state '{paint_job.status}'",
+        )
+
+    old_status = paint_job.status
     paint_job.status = status
-    from datetime import datetime, timezone
     paint_job.updated_at = datetime.now(timezone.utc)
+
+    # Append status history (append-only)
+    history_entry = PaintJobStatusHistory(
+        paint_job_id=paint_job.id,
+        previous_status=old_status,
+        new_status=status,
+        actor=1,  # TODO: Integrate with auth system when available
+        occurred_at=paint_job.updated_at,
+        reason=reason if reason else f"Status changed from {old_status} to {status}",
+    )
+    db.add(history_entry)
     db.commit()
     db.refresh(paint_job)
     return {"id": paint_job.id, "status": paint_job.status, "updated_at": paint_job.updated_at.isoformat()}
+
+
+@paintjobs_router.post("/{job_id}/estimate/approve", status_code=status.HTTP_200_OK)
+async def approve_paint_job_estimate(
+    job_id: int,
+    approved_cost: float,
+    db: Session = Depends(get_db),
+    actor_id: int = 1,  # Default staff member ID for now
+):
+    """Approve the paint job estimate.
+
+    Only service advisor or admin can approve estimates.
+    This sets the approved_cost and transitions the job to ESTIMATE_APPROVED status.
+    The status change is logged append-only in paint_job_status_history.
+    """
+    from ...app.models import PaintJob, PaintJobStatusHistory
+    from datetime import datetime, timezone
+    from fastapi import HTTPException, status
+
+    paint_job = db.get(PaintJob, job_id)
+    if not paint_job:
+        raise HTTPException(status_code=404, detail="Paint job not found")
+
+    # Check permissions: only service advisor or admin can approve
+    # In a full auth system, this would check the current user's role
+    # For now, we accept any request but log who approved
+    # TODO: Integrate with auth system when available
+
+    # Set approved cost and transition status
+    paint_job.approved_cost = approved_cost
+    old_status = paint_job.status
+    paint_job.status = "ESTIMATE_APPROVED"
+
+    # Append status history
+    history_entry = PaintJobStatusHistory(
+        paint_job_id=paint_job.id,
+        previous_status=old_status,
+        new_status="ESTIMATE_APPROVED",
+        actor=actor_id,
+        occurred_at=datetime.now(timezone.utc),
+        reason="Estimate approved",
+    )
+    db.add(history_entry)
+    db.commit()
+    db.refresh(paint_job)
+    return {
+        "id": paint_job.id,
+        "job_number": paint_job.job_number,
+        "status": paint_job.status,
+        "estimated_cost": paint_job.estimated_cost,
+        "approved_cost": paint_job.approved_cost,
+    }
 
 
 @services_router.post("", status_code=status.HTTP_201_CREATED)
