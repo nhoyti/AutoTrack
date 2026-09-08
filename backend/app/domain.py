@@ -8,6 +8,19 @@ class StaffRole(StrEnum):
     READ_ONLY = "READ_ONLY"
 
 
+class CustomerStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    LEAD = "LEAD"
+
+
+class PreferredContactMethod(StrEnum):
+    SMS = "SMS"
+    EMAIL = "EMAIL"
+    WHATSAPP = "WHATSAPP"
+    PHONE = "PHONE"
+
+
 class JobStatus(StrEnum):
     DRAFT = "DRAFT"
     INSPECTION = "INSPECTION"
