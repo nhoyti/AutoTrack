@@ -1,0 +1,1 @@
+"""AutoTrack Angular application root."""

@@ -4,7 +4,7 @@
 
 This application is designed for a car paint/body repair shop with integrated customer, vehicle, inspection, paint-job, preventive maintenance service (PMS), and customer notification management.
 
-The MVP is an internal, staff-facing web application for one shop. Staff authenticate to the application and manage the vehicle lifecycle from intake through paint work, PMS history, and customer reminders. A customer portal, online booking, payments, inventory, AI recommendations, and multi-branch administration are outside the MVP.
+The Single Page Application; MVP is an internal, staff-facing web application for one shop. Staff authenticate to the application and manage the vehicle lifecycle from intake through paint work, PMS history, and customer reminders. A customer portal, online booking, payments, inventory, AI recommendations, and multi-branch administration are outside the MVP.
 
 ### Initial Staff Roles
 

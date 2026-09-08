@@ -1,2 +1,8 @@
-create a section werein it display data of customers in a gridview 
-    - it has the functionality to update or edit and delete functionality customer details in a small popup
+🏗️ Sprint 0: Infrastructure & Foundation (1 week)
+Setup & Configuration
+•	 Project initialization (Angular + FastAPI + Supabase/PostgreSQL)
+•	 Environment configuration and secrets management
+•	 Database schema setup (initial tables: customers, vehicles, users/technicians)
+•	 Supabase Storage bucket configuration for photos/documents
+•	 CI/CD pipeline basic structure
+•	 Basic authentication scaffolding (Supabase Auth)
