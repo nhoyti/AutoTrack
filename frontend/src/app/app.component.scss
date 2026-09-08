@@ -93,6 +93,30 @@ h3 {
   letter-spacing: 0.04em;
 }
 
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.role-label {
+  color: #79766f;
+  font-family: "DM Mono", monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+
+.session-actions button {
+  padding: 8px 10px;
+  border: 1px solid #d9d5ca;
+  border-radius: 2px;
+  background: transparent;
+  color: #40515b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
 .status-pill.is-ready {
   border-color: #a9cbbb;
   color: #27724d;

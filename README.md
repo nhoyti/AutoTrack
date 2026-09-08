@@ -22,6 +22,17 @@ make install
 
 The API is available at `http://localhost:8000`. OpenAPI documentation is at `/docs`.
 
+### Sprint 1 authentication
+
+The local foundation includes staff login at `POST /api/auth/login`, the current
+staff identity endpoint at `GET /api/auth/me`, and API-enforced role access for
+the staff directory at `GET /api/admin/staff`. The Angular dashboard is guarded
+by the same bearer session.
+
+For local development, the seeded staff accounts use the password
+`autotrack-demo`. Set `AUTOTRACK_DEMO_PASSWORD` and a strong
+`AUTOTRACK_AUTH_SECRET` before using the API outside local development.
+
 ### Frontend
 
 ```bash

@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     currency: str = "USD"
     odometer_unit: str = "km"
     api_version: str = "0.1.0"
+    auth_secret: str = "development-only-change-this-secret"
+    demo_password: str = "autotrack-demo"
 
     model_config = SettingsConfigDict(
         env_prefix="AUTOTRACK_",
