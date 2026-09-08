@@ -256,4 +256,12 @@ The implemented project foundation and Sprint 3 increment include:
 - Five-minute signed photo URLs and role-enforced photo access metadata
 - Dashboard intake, inspection, upload-progress, retry, and failure states
 
-The next implementation slice is Paint and Body Repair Jobs.
+Sprint 5 is implemented in the backend with:
+
+- Draft, completed, and cancelled PMS service records with items, parts, labor,
+  calculated costs, recommendations, and operational immutability
+- Transactional PMS completion that accepts the odometer and creates schedules
+  atomically, with rollback on validation failure
+- Date-only, odometer-only, whichever-comes-first, and whichever-comes-last
+  schedule rules with deterministic evaluation
+- Active schedule supersession and append-only schedule state history

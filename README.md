@@ -59,6 +59,7 @@ This runs backend tests, Ruff linting and formatting checks, and the Angular pro
 ## Development direction
 
 The implemented slices cover staff authentication, Customer and Vehicle records,
-and Intake and Digital Inspections. Features outside the MVP, including customer
-portal, booking, payments, inventory, AI recommendations, and multi-branch
-administration, remain deferred.
+Intake and Digital Inspections, and PMS service records with maintenance
+schedules. Features outside the MVP, including customer portal, booking,
+payments, inventory, AI recommendations, and multi-branch administration, remain
+deferred.

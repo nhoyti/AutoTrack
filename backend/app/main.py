@@ -6,7 +6,7 @@ import io
 import re
 import uuid
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
@@ -24,7 +24,16 @@ from app.auth import (
     verify_password,
 )
 from app.config import get_settings
-from app.domain import ConcernSeverity, InspectionStatus, IntakeStatus, JobStatus, StaffRole
+from app.domain import (
+    ConcernSeverity,
+    InspectionStatus,
+    IntakeStatus,
+    JobStatus,
+    ScheduleRuleType,
+    ScheduleStatus,
+    ServiceStatus,
+    StaffRole,
+)
 
 settings = get_settings()
 
@@ -136,6 +145,46 @@ class JobStatusRequest(BaseModel):
     reason: str | None = None
 
 
+class ServiceItemRequest(BaseModel):
+    service_category: str
+    description: str
+    status: str = "COMPLETED"
+    cost: float = Field(default=0, ge=0)
+    next_due_odometer: int | None = Field(default=None, ge=0)
+    next_due_date: date | None = None
+    rule_type: str | None = None
+    maintenance_type: str | None = None
+
+
+class ServicePartRequest(BaseModel):
+    part_name: str
+    part_number: str | None = None
+    quantity: float = Field(default=1, gt=0)
+    unit_cost: float = Field(default=0, ge=0)
+
+
+class ServiceRecordRequest(BaseModel):
+    vehicle_id: str
+    service_date: date
+    service_type: str
+    description: str | None = None
+    odometer_reading: int | None = Field(default=None, ge=0)
+    labor_cost: float = Field(default=0, ge=0)
+    parts_cost: float | None = Field(default=None, ge=0)
+    recommendations: str | None = None
+    items: list[ServiceItemRequest] = Field(default_factory=list)
+    parts: list[ServicePartRequest] = Field(default_factory=list)
+
+
+class ServiceCancelRequest(BaseModel):
+    reason: str | None = None
+
+
+class ScheduleEvaluationRequest(BaseModel):
+    evaluated_at: datetime | None = None
+    odometer: int | None = Field(default=None, ge=0)
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -169,6 +218,8 @@ VEHICLES: dict[str, dict[str, Any]] = {}
 INTAKES: dict[str, dict[str, Any]] = {}
 INSPECTIONS: dict[str, dict[str, Any]] = {}
 JOBS: dict[str, dict[str, Any]] = {}
+SERVICES: dict[str, dict[str, Any]] = {}
+MAINTENANCE_SCHEDULES: dict[str, dict[str, Any]] = {}
 AUDIT_EVENTS: list[dict[str, Any]] = []
 SIGNED_PHOTOS: dict[str, dict[str, Any]] = {}
 
@@ -712,3 +763,290 @@ def change_job_status(
 @app.get("/api/jobs")
 def list_jobs(user: StaffUser = Depends(get_current_user)) -> list[dict[str, Any]]:
     return list(JOBS.values())
+
+
+def get_service_or_404(service_id: str) -> dict[str, Any]:
+    service = SERVICES.get(service_id)
+    if service is None:
+        raise_api_error("SERVICE_NOT_FOUND", "Service record not found.", status.HTTP_404_NOT_FOUND)
+    return service
+
+
+def schedule_specifications(service: dict[str, Any]) -> list[dict[str, Any]]:
+    specifications = []
+    for item in service.get("items", []):
+        due_date = item.get("next_due_date")
+        due_odometer = item.get("next_due_odometer")
+        if due_date is None and due_odometer is None:
+            continue
+        rule_type = item.get("rule_type")
+        if rule_type is None:
+            rule_type = (
+                ScheduleRuleType.WHICHEVER_COMES_FIRST.value
+                if due_date is not None and due_odometer is not None
+                else ScheduleRuleType.DATE_ONLY.value
+                if due_date is not None
+                else ScheduleRuleType.ODOMETER_ONLY.value
+            )
+        try:
+            rule_type = ScheduleRuleType(rule_type).value
+        except ValueError:
+            raise_api_error("INVALID_SCHEDULE_RULE", "Unknown maintenance schedule rule.", status.HTTP_400_BAD_REQUEST)
+        if rule_type in {ScheduleRuleType.DATE_ONLY.value, ScheduleRuleType.WHICHEVER_COMES_LAST.value} and due_date is None:
+            raise_api_error("INVALID_SCHEDULE", "This rule requires a due date.", status.HTTP_400_BAD_REQUEST)
+        if rule_type in {ScheduleRuleType.ODOMETER_ONLY.value, ScheduleRuleType.WHICHEVER_COMES_LAST.value} and due_odometer is None:
+            raise_api_error("INVALID_SCHEDULE", "This rule requires a due odometer.", status.HTTP_400_BAD_REQUEST)
+        if rule_type == ScheduleRuleType.WHICHEVER_COMES_FIRST.value and (due_date is None or due_odometer is None):
+            raise_api_error("INVALID_SCHEDULE", "This rule requires a due date and odometer.", status.HTTP_400_BAD_REQUEST)
+        specifications.append(
+            {
+                "maintenance_type": item.get("maintenance_type") or item.get("service_category"),
+                "due_date": due_date,
+                "due_odometer": due_odometer,
+                "rule_type": rule_type,
+                "source_service_item_id": item["service_item_id"],
+            }
+        )
+    return specifications
+
+
+def evaluate_schedule(schedule: dict[str, Any], evaluated_at: datetime, odometer: int) -> str:
+    current_date = evaluated_at.astimezone(UTC).date()
+    due_date = date.fromisoformat(schedule["due_date"]) if schedule.get("due_date") else None
+    due_odometer = schedule.get("due_odometer")
+    date_due = due_date is not None and current_date >= due_date
+    odometer_due = due_odometer is not None and odometer >= due_odometer
+    date_overdue = due_date is not None and current_date > due_date
+    odometer_overdue = due_odometer is not None and odometer > due_odometer
+    rule_type = schedule["rule_type"]
+    if rule_type == ScheduleRuleType.DATE_ONLY.value:
+        due, overdue = date_due, date_overdue
+    elif rule_type == ScheduleRuleType.ODOMETER_ONLY.value:
+        due, overdue = odometer_due, odometer_overdue
+    elif rule_type == ScheduleRuleType.WHICHEVER_COMES_FIRST.value:
+        due, overdue = date_due or odometer_due, date_overdue or odometer_overdue
+    else:
+        due, overdue = date_due and odometer_due, date_overdue and odometer_overdue
+    return ScheduleStatus.OVERDUE.value if overdue else ScheduleStatus.DUE.value if due else ScheduleStatus.PLANNED.value
+
+
+def schedule_history_entry(previous_status: str | None, new_status: str, actor_user_id: str, reason: str) -> dict[str, Any]:
+    return {
+        "previous_status": previous_status,
+        "new_status": new_status,
+        "actor_user_id": actor_user_id,
+        "occurred_at": iso_utc(),
+        "reason": reason,
+    }
+
+
+@app.post("/api/services", status_code=status.HTTP_201_CREATED)
+@app.post("/api/service-records", status_code=status.HTTP_201_CREATED)
+def create_service_record(
+    payload: ServiceRecordRequest,
+    user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR, StaffRole.TECHNICIAN_PAINTER)),
+) -> dict[str, Any]:
+    get_vehicle_or_404(payload.vehicle_id)
+    service_id = uuid.uuid4().hex
+    items = []
+    for item in payload.items:
+        item_data = item.model_dump(mode="json")
+        item_data["service_item_id"] = uuid.uuid4().hex
+        items.append(item_data)
+    parts = []
+    for part in payload.parts:
+        part_data = part.model_dump(mode="json")
+        part_data["service_part_id"] = uuid.uuid4().hex
+        part_data["total_cost"] = round(part.quantity * part.unit_cost, 2)
+        parts.append(part_data)
+    calculated_parts_cost = round(sum(part["total_cost"] for part in parts), 2)
+    service = {
+        "service_id": service_id,
+        "vehicle_id": payload.vehicle_id,
+        "service_date": payload.service_date.isoformat(),
+        "odometer_reading": payload.odometer_reading,
+        "service_type": payload.service_type,
+        "description": payload.description,
+        "status": ServiceStatus.DRAFT.value,
+        "labor_cost": payload.labor_cost,
+        "parts_cost": calculated_parts_cost if payload.parts else payload.parts_cost or 0,
+        "total_cost": round(payload.labor_cost + calculated_parts_cost + sum(item["cost"] for item in items), 2),
+        "recommendations": payload.recommendations,
+        "items": items,
+        "parts": parts,
+        "created_at": iso_utc(),
+        "updated_at": iso_utc(),
+    }
+    SERVICES[service_id] = service
+    record_audit("SERVICE_CREATED", user.user_id, {"service_id": service_id, "vehicle_id": payload.vehicle_id})
+    return service
+
+
+@app.get("/api/services/{service_id}")
+@app.get("/api/service-records/{service_id}")
+def get_service_record(service_id: str, user: StaffUser = Depends(get_current_user)) -> dict[str, Any]:
+    return get_service_or_404(service_id)
+
+
+@app.patch("/api/services/{service_id}")
+@app.patch("/api/service-records/{service_id}")
+def update_service_record(
+    service_id: str,
+    payload: dict[str, Any],
+    user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR, StaffRole.TECHNICIAN_PAINTER)),
+) -> dict[str, Any]:
+    service = get_service_or_404(service_id)
+    if service["status"] != ServiceStatus.DRAFT.value:
+        raise_api_error("SERVICE_LOCKED", "Completed or cancelled service records are immutable.", status.HTTP_409_CONFLICT)
+    if payload.get("vehicle_id") is not None and payload["vehicle_id"] != service["vehicle_id"]:
+        raise_api_error("SERVICE_VEHICLE_IMMUTABLE", "A service record cannot change vehicles.", status.HTTP_400_BAD_REQUEST)
+    editable_fields = {
+        "service_date",
+        "odometer_reading",
+        "service_type",
+        "description",
+        "labor_cost",
+        "recommendations",
+        "items",
+        "parts",
+    }
+    for key, value in payload.items():
+        if key in editable_fields:
+            service[key] = value
+    service["updated_at"] = iso_utc()
+    record_audit("SERVICE_UPDATED", user.user_id, {"service_id": service_id})
+    return service
+
+
+@app.post("/api/services/{service_id}/complete")
+@app.post("/api/service-records/{service_id}/complete")
+def complete_service_record(
+    service_id: str,
+    user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR, StaffRole.TECHNICIAN_PAINTER)),
+) -> dict[str, Any]:
+    service = get_service_or_404(service_id)
+    if service["status"] == ServiceStatus.COMPLETED.value:
+        return service
+    if service["status"] == ServiceStatus.CANCELLED.value:
+        raise_api_error("SERVICE_NOT_COMPLETABLE", "Cancelled service records cannot be completed.", status.HTTP_409_CONFLICT)
+    vehicle = get_vehicle_or_404(service["vehicle_id"])
+    specifications = schedule_specifications(service)
+    needs_odometer = any(spec["due_odometer"] is not None for spec in specifications)
+    if needs_odometer and service.get("odometer_reading") is None:
+        raise_api_error("ODOMETER_REQUIRED", "An odometer reading is required for this schedule.", status.HTTP_400_BAD_REQUEST)
+    current_odometer = vehicle.get("current_odometer")
+    if service.get("odometer_reading") is not None and current_odometer is not None and service["odometer_reading"] < current_odometer:
+        raise_api_error("ODOMETER_REGRESSION", "Odometer reading regressed below the current reading.", status.HTTP_400_BAD_REQUEST)
+
+    updated_vehicle = deepcopy(vehicle)
+    updated_schedules = deepcopy(MAINTENANCE_SCHEDULES)
+    updated_service = deepcopy(service)
+    if service.get("odometer_reading") is not None:
+        updated_vehicle.setdefault("readings", []).append(
+            {
+                "value": service["odometer_reading"],
+                "unit": settings.odometer_unit,
+                "recorded_at": iso_utc(),
+                "source_record": service_id,
+                "is_correction": False,
+            }
+        )
+        updated_vehicle["current_odometer"] = service["odometer_reading"]
+        updated_vehicle["updated_at"] = iso_utc()
+    updated_service["status"] = ServiceStatus.COMPLETED.value
+    updated_service["completed_at"] = iso_utc()
+    updated_service["completed_by"] = user.user_id
+    updated_service["updated_at"] = iso_utc()
+    new_schedule_ids = []
+    for specification in specifications:
+        schedule_id = uuid.uuid4().hex
+        for existing in updated_schedules.values():
+            if (
+                existing["vehicle_id"] == service["vehicle_id"]
+                and existing["maintenance_type"] == specification["maintenance_type"]
+                and existing["status"] in {ScheduleStatus.PLANNED.value, ScheduleStatus.DUE.value, ScheduleStatus.OVERDUE.value}
+            ):
+                existing["status"] = ScheduleStatus.SKIPPED.value
+                existing["superseded_by_schedule_id"] = schedule_id
+                existing.setdefault("state_history", []).append(
+                    schedule_history_entry(existing["state_history"][-1]["new_status"], ScheduleStatus.SKIPPED.value, user.user_id, "Superseded by completed service")
+                )
+        schedule = {
+            "schedule_id": schedule_id,
+            "vehicle_id": service["vehicle_id"],
+            "service_record_id": service_id,
+            "maintenance_type": specification["maintenance_type"],
+            "due_date": specification["due_date"],
+            "due_odometer": specification["due_odometer"],
+            "rule_type": specification["rule_type"],
+            "status": ScheduleStatus.PLANNED.value,
+            "source_service_item_id": specification["source_service_item_id"],
+            "superseded_by_schedule_id": None,
+            "state_history": [schedule_history_entry(None, ScheduleStatus.PLANNED.value, user.user_id, "Schedule created")],
+            "created_at": iso_utc(),
+            "updated_at": iso_utc(),
+        }
+        updated_schedules[schedule_id] = schedule
+        new_schedule_ids.append(schedule_id)
+    updated_service["schedule_ids"] = new_schedule_ids
+    VEHICLES[service["vehicle_id"]] = updated_vehicle
+    SERVICES[service_id] = updated_service
+    MAINTENANCE_SCHEDULES.clear()
+    MAINTENANCE_SCHEDULES.update(updated_schedules)
+    record_audit("SERVICE_COMPLETED", user.user_id, {"service_id": service_id, "schedule_ids": new_schedule_ids})
+    return updated_service
+
+
+@app.post("/api/services/{service_id}/cancel")
+@app.post("/api/service-records/{service_id}/cancel")
+def cancel_service_record(
+    service_id: str,
+    payload: ServiceCancelRequest | None = None,
+    user: StaffUser = Depends(require_roles(StaffRole.ADMIN_MANAGER, StaffRole.SERVICE_ADVISOR)),
+) -> dict[str, Any]:
+    service = get_service_or_404(service_id)
+    if service["status"] != ServiceStatus.DRAFT.value:
+        raise_api_error("SERVICE_LOCKED", "Only draft service records can be cancelled.", status.HTTP_409_CONFLICT)
+    service["status"] = ServiceStatus.CANCELLED.value
+    service["cancelled_at"] = iso_utc()
+    service["cancelled_by"] = user.user_id
+    service["cancellation_reason"] = payload.reason if payload else None
+    service["updated_at"] = iso_utc()
+    record_audit("SERVICE_CANCELLED", user.user_id, {"service_id": service_id})
+    return service
+
+
+@app.get("/api/maintenance-schedules")
+def list_maintenance_schedules(
+    vehicle_id: str | None = None,
+    user: StaffUser = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    schedules = list(MAINTENANCE_SCHEDULES.values())
+    return [schedule for schedule in schedules if vehicle_id is None or schedule["vehicle_id"] == vehicle_id]
+
+
+@app.get("/api/maintenance-schedules/{schedule_id}")
+def get_maintenance_schedule(schedule_id: str, user: StaffUser = Depends(get_current_user)) -> dict[str, Any]:
+    schedule = MAINTENANCE_SCHEDULES.get(schedule_id)
+    if schedule is None:
+        raise_api_error("SCHEDULE_NOT_FOUND", "Maintenance schedule not found.", status.HTTP_404_NOT_FOUND)
+    return schedule
+
+
+@app.post("/api/maintenance-schedules/{schedule_id}/evaluate")
+def evaluate_maintenance_schedule(
+    schedule_id: str,
+    payload: ScheduleEvaluationRequest | None = None,
+    user: StaffUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    schedule = MAINTENANCE_SCHEDULES.get(schedule_id)
+    if schedule is None:
+        raise_api_error("SCHEDULE_NOT_FOUND", "Maintenance schedule not found.", status.HTTP_404_NOT_FOUND)
+    vehicle = get_vehicle_or_404(schedule["vehicle_id"])
+    evaluated_at = (payload.evaluated_at if payload and payload.evaluated_at else datetime.now(UTC))
+    odometer = payload.odometer if payload and payload.odometer is not None else vehicle.get("current_odometer") or 0
+    result = deepcopy(schedule)
+    result["evaluated_status"] = evaluate_schedule(schedule, evaluated_at, odometer)
+    result["evaluated_at"] = iso_utc(evaluated_at)
+    result["evaluated_odometer"] = odometer
+    return result

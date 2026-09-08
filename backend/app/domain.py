@@ -51,6 +51,28 @@ class InspectionStatus(StrEnum):
     COMPLETED = "COMPLETED"
 
 
+class ServiceStatus(StrEnum):
+    DRAFT = "DRAFT"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class ScheduleRuleType(StrEnum):
+    DATE_ONLY = "DATE_ONLY"
+    ODOMETER_ONLY = "ODOMETER_ONLY"
+    WHICHEVER_COMES_FIRST = "WHICHEVER_COMES_FIRST"
+    WHICHEVER_COMES_LAST = "WHICHEVER_COMES_LAST"
+
+
+class ScheduleStatus(StrEnum):
+    PLANNED = "PLANNED"
+    DUE = "DUE"
+    OVERDUE = "OVERDUE"
+    COMPLETED = "COMPLETED"
+    SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
+
+
 class ConcernSeverity(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
